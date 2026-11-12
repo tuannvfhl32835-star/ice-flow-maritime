@@ -1,0 +1,1283 @@
+<!DOCTYPE html>
+<html lang="vi" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ICE FLOW — Maritime Cockpit</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="animation.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/globe.gl"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+                                                                                                                                        tailwind.config = {
+                                                                                                                                            darkMode: 'class',
+                                                                                                                                            theme: {
+                                                                                                                                                extend: {
+                                                                                                                                                    colors: {
+                                                                                                                                                        navy: {
+                                                                                                                                                            900: '#030712',
+                                                                                                                                                            800: '#0B132B',
+                                                                                                                                                            700: '#1C2541',
+                                                                                                                                                            600: '#3A506B'
+                                                                                                                                                        },
+                                                                                                                                                        ice: {
+                                                                                                                                                            cyan: '#00F0FF',
+                                                                                                                                                            blue: '#48CAE4',
+                                                                                                                                                            danger: '#FF2A6D',
+                                                                                                                                                            warning: '#FFB703',
+                                                                                                                                                            safe: '#06D6A0'
+                                                                                                                                                        }
+                                                                                                                                                    }
+                                                                                                                                                }
+                                                                                                                                            }
+                                                                                                                                        }
+    </script>
+    <style>
+        html, body {
+            height: 100%;
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #0b132b;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #3a506b;
+            border-radius: 3px;
+        }
+
+        .leaflet-container {
+            background: #030712 !important;
+            font-family: inherit;
+        }
+
+        .leaflet-popup-content-wrapper, .leaflet-popup-tip {
+            background: #0b132b !important;
+            color: #e2e8f0 !important;
+            border: 1px solid #3a506b;
+        }
+
+        .glass-panel {
+            background: rgba(11, 19, 43, 0.78);
+            backdrop-filter: blur(14px);
+            border: 1px solid rgba(58, 80, 107, 0.55);
+        }
+
+        .cockpit-body {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+        }
+
+        #stage {
+            position: relative;
+            flex: 1;
+            min-width: 0;
+            min-height: 0;
+        }
+
+        #ice-map, #globe-container {
+            position: absolute;
+            inset: 0;
+        }
+
+        #globe-container {
+            z-index: 5;
+            background: #030712;
+            transition: opacity 0.8s ease;
+        }
+
+        #ice-map {
+            z-index: 1;
+            width: 100%;
+            height: 100%;
+        }
+
+        .hud {
+            z-index: 30;
+        }
+
+        .cursor-target-reticle, .cursor-target-reticle .leaflet-container {
+            cursor: crosshair !important;
+        }
+
+        .ship-heading {
+            transform-origin: center center;
+        }
+    </style>
+    <!-- ==================== HỆ THỐNG MÀN HÌNH MỞ ĐẦU ĐÔI CHUẨN (WELCOME & LOADING) ==================== -->
+    <!-- 1. MÀN HÌNH BẤM START + NHẬP TÊN TÀU (WELCOME SCREEN) -->
+    <div id="welcome-screen" style="position:fixed;top:0;left:0;width:100vw;height:100vh;background-color:#070c1e;z-index:9999999;display:flex;flex-direction:column;justify-content:center;align-items:center;transition:opacity 0.6s ease, visibility 0.6s;">
+        <div style="text-align:center;font-family:sans-serif;width: 100%;max-width: 400px;padding: 20px;">
+            <i class="fa-solid fa-ship" style="font-size:70px;color:#48cae4;margin-bottom:20px;filter:drop-shadow(0 0 15px rgba(72,202,228,0.4));"></i>
+            <h1 style="font-size:40px;letter-spacing:6px;color:#ffffff;margin:0 0 10px 0;font-weight:700;">ICE FLOW</h1>
+            <p style="font-size:14px;color:#64748b;margin-bottom:30px;letter-spacing:2px;">MARITIME COCKPIT SYSTEM</p>
+
+            <!-- Ô nhập tên tàu tùy chọn -->
+            <div style="margin-bottom:30px;text-align:left;">
+                <label style="color:#48cae4;font-size:12px;letter-spacing:1px;display:block;margin-bottom:8px;font-weight:bold;">VESSEL NAME:</label>
+                <input type="text" id="input-vessel-name" value="ARCTIC EXPLORER I" style="width:100%;background:rgba(11,19,43,0.8);border:1px solid #48cae4;padding:12px;color:#fff;border-radius:4px;font-size:16px;font-weight:bold;letter-spacing:1px;box-shadow:0 0 10px rgba(72,202,228,0.1);outline:none;">
+            </div>
+
+            <button onclick="startMyApplication()" class="btn-start-system" style="width:100%;">LAUNCH SYSTEM</button>
+        </div>
+    </div>
+
+    <!-- 2. MÀN HÌNH LOADING BÔNG TUYẾT -->
+    <div id="splash-screen" style="position:fixed;top:0;left:0;width:100vw;height:100vh;background-color:#0b132b;z-index:999998;display:none;flex-direction:column;justify-content:center;align-items:center;transition:opacity 0.5s ease, visibility 0.5s;">
+        <div style="text-align:center;color:#ffffff;font-family:sans-serif;">
+            <div style="position:relative;width:200px;height:200px;margin:0 auto;display:flex;justify-content:center;align-items:center;">
+                <div class="snowflake-loading">❄</div>
+                <div class="sea-wave-new"></div>
+            </div>
+            <h1 id="splash-loading-text" style="font-size:32px;letter-spacing:4px;margin:25px 0 5px 0;color:#48cae4;font-weight:700;text-shadow:0 0 10px rgba(72,202,228,0.5);">LOADING...</h1>
+            <p id="splash-loading-subtext" style="font-size:13px;color:#a0aec0;margin:0;letter-spacing:1px;">Processing maritime routing data...</p>
+        </div>
+    </div>
+
+    <!-- 2. MÀN HÌNH LOADING BÔNG TUYẾT (Mặc định ẩn hoàn toàn bằng display: none) -->
+    <div id="splash-screen" style="position:fixed;top:0;left:0;width:100vw;height:100vh;background-color:#0b132b;z-index:999998;display:none;flex-direction:column;justify-content:center;align-items:center;transition:opacity 0.5s ease, visibility 0.5s;opacity:1;visibility:visible;">
+        <div style="text-align:center;color:#ffffff;font-family:sans-serif;">
+            <div style="position:relative;width:200px;height:200px;margin:0 auto;display:flex;justify-content:center;align-items:center;">
+                <div class="snowflake-loading">❄</div>
+                <div class="sea-wave-new"></div>
+            </div>
+            <h1 id="splash-loading-text" style="font-size:32px;letter-spacing:4px;margin:25px 0 5px 0;color:#48cae4;font-weight:700;text-shadow:0 0 10px rgba(72,202,228,0.5);">LOADING...</h1>
+            <p id="splash-loading-subtext" style="font-size:13px;color:#a0aec0;margin:0;letter-spacing:1px;">Processing maritime routing data...</p>
+        </div>
+    </div>
+
+    <style>
+        .btn-start-system {
+            background: transparent;
+            color: #48cae4;
+            border: 2px solid #48cae4;
+            padding: 15px 40px;
+            font-size: 16px;
+            font-weight: bold;
+            letter-spacing: 3px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.3s ease;
+            box-shadow: 0 0 15px rgba(72,202,228,0.2);
+        }
+
+            .btn-start-system:hover {
+                background: #48cae4;
+                color: #070c1e;
+                box-shadow: 0 0 25px rgba(72,202,228,0.6);
+                transform: scale(1.05);
+            }
+
+        .snowflake-loading {
+            font-size: 100px;
+            color: #48cae4;
+            text-shadow: 0 0 20px rgba(72, 202, 228, 0.6);
+            animation: tuyetXoayDapDenh 4s linear infinite;
+            z-index: 3;
+            pointer-events: none;
+            user-select: none;
+        }
+
+        .sea-wave-new {
+            position: absolute !important;
+            bottom: 35px !important;
+            width: 90px !important;
+            height: 10px !important;
+            background: rgba(72, 202, 228, 0.35) !important;
+            border-radius: 50% !important;
+            filter: blur(3px) !important;
+            animation: songBienIce 2s infinite ease-in-out !important;
+            z-index: 1;
+        }
+
+        @keyframes tuyetXoayDapDenh {
+            0% {
+                transform: translateY(0) rotate(0deg);
+            }
+
+            50% {
+                transform: translateY(-12px) rotate(180deg);
+            }
+
+            100% {
+                transform: translateY(0) rotate(360deg);
+            }
+        }
+
+        @keyframes songBienIce {
+            0%, 100% {
+                transform: scale(1);
+                opacity: 0.6;
+            }
+
+            50% {
+                transform: scale(1.25);
+                opacity: 0.15;
+            }
+        }
+
+        .hidden-splash {
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+        }
+    </style>
+    <!-- =============================================================================================== -->
+
+
+    <body class="bg-navy-900 text-slate-100 font-sans h-screen flex flex-col overflow-hidden select-none">
+
+        <header class="h-16 bg-navy-800 border-b border-navy-600/50 px-4 flex items-center justify-between z-40 shrink-0">
+            <div class="flex items-center space-x-3">
+
+                <i class="fa-solid fa-snowflake text-2xl text-ice-cyan menu-snowflake-rotate"></i>
+                <span class="hidden md:inline-block px-2 py-0.5 text-[10px] font-semibold bg-ice-cyan/10 text-ice-cyan border border-ice-cyan/30 rounded">COCKPIT</span>
+            </div>
+            <div class="hidden lg:flex items-center space-x-6 text-xs bg-navy-900/80 px-4 py-2 rounded-lg border border-navy-600/40">
+                <div>
+                    <span class="text-slate-400 block text-[10px]">VESSEL</span>
+                    <span class="font-bold text-white"><i class="fa-solid fa-ship text-ice-cyan mr-1"></i><span id="display-vessel-name">ARCTIC EXPLORER I</span></span>
+                </div>
+                <div onclick="flyToShipCamera()" title="Bấm để bay camera tới vị trí tàu" class="cursor-pointer hover:bg-navy-800 px-2 py-1 rounded transition">
+                    <span class="text-slate-400 block text-[10px]">GPS <i class="fa-solid fa-crosshairs text-ice-cyan ml-1"></i></span>
+                    <span class="font-mono text-slate-200 underline decoration-ice-cyan/50" id="header-coords">—</span>
+                </div>
+                <div>
+                    <span class="text-slate-400 block text-[10px]">SOG</span>
+                    <span class="font-mono text-slate-200" id="header-speed">0.0 Knots</span>
+                </div>
+                <div>
+                    <span class="text-slate-400 block text-[10px]">COG</span>
+                    <span class="font-mono text-slate-200" id="header-cog">000° (N)</span>
+                </div>
+            <div class="flex items-center space-x-3">
+                <button onclick="toggleSimulationAlert()" class="px-3 py-1.5 text-xs font-bold bg-ice-danger/25 text-ice-danger border border-ice-danger/50 rounded-lg">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                    <span class="hidden sm:inline ml-1">Mô phỏng nguy hiểm</span>
+                </button>
+                <div class="flex items-center space-x-1 bg-navy-900 px-2 py-1 rounded-lg border border-navy-600/40">
+                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span class="text-xs font-mono px-1" id="system-clock">--:--:-- UTC</span>
+                </div>
+            </div>
+        </header>
+
+        <div id="red-alert-banner" class="hidden border-y-2 border-ice-danger bg-ice-danger/20 px-6 py-3 z-40 flex flex-col md:flex-row items-center justify-between gap-3">
+            <div>
+                <h4 class="font-black text-ice-danger text-sm">CẢNH BÁO: băng vào vùng đệm an toàn</h4>
+                <p class="text-xs text-slate-200">ICE-GS-01 cắt hành lang mặc định. TCPA mô phỏng <span id="alert-tcpa">07:24</span> · CPA <span id="alert-distance">1.8 NM</span></p>
+            </div>
+            <button onclick="dismissAlert()" class="px-3 py-1.5 text-xs bg-navy-900 rounded border border-slate-600">Tắt báo động</button>
+        </div>
+
+        <div class="cockpit-body">
+            <aside class="w-80 lg:w-96 bg-navy-800 border-r border-navy-600/50 flex flex-col shrink-0 z-20 overflow-y-auto">
+                <div class="grid grid-cols-3 bg-navy-900/50 p-1 border-b border-navy-600/50 text-[11px] font-semibold">
+                    <button id="tab-nav-btn" onclick="switchLeftTab('nav')" class="py-2.5 rounded-md text-center text-ice-cyan bg-navy-700 border border-ice-cyan/30">Định tuyến AI</button>
+                    <button id="tab-nasa-btn" onclick="switchLeftTab('nasa')" class="py-2.5 rounded-md text-center text-slate-400">NASA Data</button>
+                    <button id="tab-crowd-btn" onclick="switchLeftTab('crowd')" class="py-2.5 rounded-md text-center text-slate-400">Phản hồi</button>
+                </div>
+
+                <div id="panel-nav" class="p-4 space-y-4">
+                    <div class="glass-panel rounded-xl p-4 border border-ice-cyan/20 space-y-3">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-bold text-ice-cyan uppercase tracking-wider"><i class="fa-solid fa-route mr-1"></i>Ice Collision Avoidance</span>
+                            <span class="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full">localhost:3000</span>
+                        </div>
+                        <div class="bg-navy-900/80 p-2 rounded border border-navy-600/40 space-y-1.5 text-xs">
+                            <div class="flex justify-between items-center">
+                                <span class="text-emerald-400 font-bold">Điểm bắt đầu</span>
+                                <span class="space-x-1">
+                                    <button id="btn-gps" onclick="requestAndGetLocation()" class="text-[10px] px-2 py-0.5 bg-ice-cyan/20 text-ice-cyan border border-ice-cyan/40 rounded">GPS của tôi</button>
+                                    <button id="btn-pick-start" onclick="pickOnMap('start')" class="text-[10px] px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded">Chọn map</button>
+                                </span>
+                            </div>
+                            <div class="grid grid-cols-2 gap-1 font-mono text-[10px]">
+                                <input id="start-lat" type="number" step="any" value="75.60" class="bg-navy-800 border border-navy-600 rounded px-1.5 py-1">
+                                <input id="start-lng" type="number" step="any" value="-14.50" class="bg-navy-800 border border-navy-600 rounded px-1.5 py-1">
+                            </div>
+                        </div>
+                        <div class="bg-navy-900/80 p-2 rounded border border-navy-600/40 space-y-1.5 text-xs">
+                            <div class="flex justify-between items-center">
+                                <span class="text-ice-danger font-bold">Điểm đến</span>
+                                <button id="btn-pick-end" onclick="pickOnMap('end')" class="text-[10px] px-2 py-0.5 bg-red-500/20 text-red-300 border border-red-500/30 rounded">Chọn trên map</button>
+                            </div>
+                            <div class="grid grid-cols-2 gap-1 font-mono text-[10px]">
+                                <input id="end-lat" type="number" step="any" value="72.40" class="bg-navy-800 border border-navy-600 rounded px-1.5 py-1">
+                                <input id="end-lng" type="number" step="any" value="-6.80" class="bg-navy-800 border border-navy-600 rounded px-1.5 py-1">
+                            </div>
+                        </div>
+                        <div class="space-y-1.5 text-xs">
+                            <div class="flex justify-between"><span class="text-slate-400">Trạng thái</span><span id="routing-status" class="text-amber-400 font-semibold">Sẵn sàng</span></div>
+                            <div class="flex justify-between"><span class="text-slate-400">Quãng đường</span><span id="route-distance" class="font-mono font-bold">—</span></div>
+                            <div class="flex justify-between"><span class="text-slate-400">TCPA gần nhất</span><span id="route-tcpa" class="font-mono text-amber-300 font-bold text-right">—</span></div>
+                            <div class="flex justify-between"><span class="text-slate-400">Tiết kiệm nhiên liệu</span><span id="fuel-saving" class="text-emerald-400 font-bold">—</span></div>
+                        </div>
+                        <button onclick="startExpandingRouteSimulation()" class="w-full py-2 bg-ice-cyan/20 hover:bg-ice-cyan/30 text-ice-cyan border border-ice-cyan/50 rounded-lg text-xs font-bold">
+                            <i class="fa-solid fa-arrows-to-dot"></i> Tính tuyến an toàn
+                        </button>
+                    </div>
+
+                    <div class="glass-panel rounded-xl p-4 space-y-2">
+                        <div class="flex justify-between text-xs">
+                            <span class="font-bold text-slate-300">Bán kính vùng đệm</span>
+                            <span id="buffer-val-display" class="font-mono text-ice-cyan font-bold">5.0 NM</span>
+                        </div>
+                        <input type="range" min="1" max="15" step="0.5" value="5" oninput="updateBufferRadius(this.value)" class="w-full accent-ice-cyan">
+                    </div>
+
+                    <div class="glass-panel rounded-xl p-4 space-y-2 text-xs">
+                        <h4 class="font-bold text-slate-300 uppercase tracking-wider">Phân loại băng</h4>
+                        <label class="flex justify-between items-center"><span><i class="fa-solid fa-circle text-ice-danger mr-2"></i>Rủi ro cao</span><input type="checkbox" checked onchange="toggleIceFilter('high')" class="accent-ice-cyan"></label>
+                        <label class="flex justify-between items-center"><span><i class="fa-solid fa-circle text-ice-warning mr-2"></i>Trung bình</span><input type="checkbox" checked onchange="toggleIceFilter('med')" class="accent-ice-cyan"></label>
+                        <label class="flex justify-between items-center"><span><i class="fa-solid fa-circle text-ice-safe mr-2"></i>Băng vụn</span><input type="checkbox" checked onchange="toggleIceFilter('low')" class="accent-ice-cyan"></label>
+                    </div>
+
+                    <div class="glass-panel rounded-xl p-4 space-y-2">
+                        <span class="text-xs font-bold text-slate-300"><i class="fa-solid fa-key text-amber-400 mr-1"></i>CartoDB / Google Maps API Key</span>
+                        <div class="flex gap-2">
+                            <input id="custom-api-key" type="password" placeholder="Carto api_key hoặc AIza…" class="bg-navy-900 border border-navy-600 text-xs rounded px-2 py-1 flex-1 font-mono">
+                            <button onclick="applyCustomApiKey()" class="px-3 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded text-xs font-bold">Lưu</button>
+                        </div>
+                        <p class="text-[10px] text-slate-400">Key Google (AIza…) gắn vào lớp vệ tinh. Key khác gửi kèm lớp CartoDB dark.</p>
+                    </div>
+                </div>
+
+                <div id="panel-nasa" class="p-4 space-y-4 hidden">
+                    <div class="glass-panel rounded-xl p-4 space-y-3">
+                        <h3 class="text-xs font-bold text-ice-cyan uppercase"><i class="fa-solid fa-satellite mr-1"></i>NASA Worldview &amp; FIRMS</h3>
+                        <input id="firms-key" type="password" placeholder="FIRMS MAP_KEY (tuỳ chọn)" class="w-full bg-navy-900 border border-navy-600 text-xs rounded px-2 py-1 font-mono">
+                        <button onclick="loadNasa48h()" class="w-full py-2 text-xs font-bold rounded-lg border border-emerald-500/40 text-emerald-400 bg-emerald-500/10">Tải feed 48 giờ</button>
+                        <div class="flex gap-2">
+                            <select id="nasa-year-select" class="bg-navy-900 border border-navy-600 text-xs rounded px-2 py-1 flex-1">
+                                <option value="all">Mọi năm</option>
+                                <option value="2017">2017 · A-68 Larsen C</option>
+                                <option value="2021">2021 · A-76 Ronne</option>
+                                <option value="2023">2023 · A-81 Brunt</option>
+                                <option value="2025">2025 · Greenland Sea</option>
+                            </select>
+                            <button onclick="loadNasaHistoricalData()" class="px-3 py-2 text-xs font-bold rounded-lg border border-indigo-500/40 text-indigo-300 bg-indigo-600/20">Nạp</button>
+                        </div>
+                        <label class="block text-[11px] text-slate-300">Tệp .json / .geojson</label>
+                        <input id="nasa-file-input" type="file" accept=".json,.geojson,application/json" onchange="handleNasaFileUpload(this)" class="w-full text-xs text-slate-400">
+                    </div>
+                    <div class="glass-panel rounded-xl p-3">
+                        <span class="text-[11px] font-bold text-slate-400 uppercase">Bản ghi đã nạp</span>
+                        <div id="nasa-ingested-list" class="mt-2 space-y-2 text-[11px] max-h-48 overflow-y-auto text-slate-400">Chưa có bản ghi.</div>
+                    </div>
+                </div>
+
+                <div id="panel-crowd" class="p-4 space-y-4 hidden">
+                    <form id="crowd-form" onsubmit="submitCrowdsourcedIce(event)" class="glass-panel rounded-xl p-4 space-y-3 text-xs">
+                        <h3 class="font-bold text-ice-cyan uppercase"><i class="fa-solid fa-satellite-dish mr-1"></i>Báo cáo băng thực địa</h3>
+                        <div class="grid grid-cols-2 gap-2">
+                            <input id="ice-lat" type="number" step="any" value="74.10" required class="bg-navy-900 border border-navy-600 rounded px-2 py-1.5 font-mono">
+                            <input id="ice-lng" type="number" step="any" value="-9.20" required class="bg-navy-900 border border-navy-600 rounded px-2 py-1.5 font-mono">
+                        </div>
+                        <select id="ice-size" class="w-full bg-navy-900 border border-navy-600 rounded px-2 py-1.5">
+                            <option value="Small">Nhỏ (&lt; 15 m)</option>
+                            <option value="Medium" selected>Vừa (15–50 m)</option>
+                            <option value="Large">Lớn (&gt; 50 m)</option>
+                        </select>
+                        <textarea id="ice-notes" rows="2" placeholder="Ghi chú hiện trường" class="w-full bg-navy-900 border border-navy-600 rounded px-2 py-1.5"></textarea>
+                        <button type="submit" class="w-full py-2 bg-ice-cyan text-navy-900 font-bold rounded">Tạo tảng băng trên bản đồ</button>
+                    </form>
+                    <div class="glass-panel rounded-xl p-3">
+                        <span class="text-[11px] font-bold text-slate-400 uppercase">Xác thực gần đây</span>
+                        <div id="crowd-feed-list" class="mt-2 space-y-2 text-[11px] max-h-40 overflow-y-auto"></div>
+                    </div>
+                </div>
+            </aside>
+
+            <main id="stage">
+                <div id="ice-map"></div>
+                <div id="globe-container"></div>
+
+                <div class="hud absolute top-4 left-4 glass-panel p-1.5 rounded-xl flex items-center space-x-1">
+                    <button id="tool-pan" onclick="setMapTool('pan')" class="p-2 rounded-lg text-ice-cyan bg-navy-700 border border-ice-cyan/40" title="Pan"><i class="fa-solid fa-hand text-sm"></i></button>
+                    <button id="tool-draw" onclick="setMapTool('draw')" class="p-2 rounded-lg text-slate-400" title="Freehand line / polygon"><i class="fa-solid fa-pen-ruler text-sm"></i></button>
+                    <button onclick="clearUserDrawings()" class="p-2 rounded-lg text-slate-400 hover:text-red-400" title="Clear annotations"><i class="fa-solid fa-trash-can text-sm"></i></button>
+                </div>
+
+                <div class="hud absolute top-4 right-4 glass-panel p-3 rounded-lg text-xs space-y-2 border border-navy-600/60 max-w-xs">
+                    <div class="font-bold text-slate-200 flex items-center justify-between gap-3">
+                        <span id="map-mode-label">CHẾ ĐỘ RA-ĐA SAR</span>
+                        <span class="w-2 h-2 rounded-full bg-ice-cyan animate-ping"></span>
+                    </div>
+                    <div class="flex flex-wrap gap-1">
+                        <button id="btn-view-mode" onclick="toggleViewMode()" class="px-2 py-1 bg-indigo-600/30 text-indigo-200 border border-indigo-500/40 rounded text-[11px] font-bold">3D Globe / 2D Map</button>
+                        <button id="btn-toggle-map" onclick="toggleMapTileLayer()" class="px-2 py-1 bg-ice-cyan/20 text-ice-cyan border border-ice-cyan/40 rounded text-[11px] font-bold">Vệ tinh Trái Đất</button>
+                        <button onclick="focusOnShip()" class="px-2 py-1 bg-navy-700 rounded text-[11px] border border-navy-600">Định vị tàu</button>
+                        <button onclick="resetMapView()" class="px-2 py-1 bg-navy-700 rounded text-[11px] border border-navy-600">Toàn cảnh</button>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <script>
+                                                                                                                                                                            const API_ROUTE = "http://localhost:3000/api/route";
+                                                                                                                                                                            const TILE_BOUNDS = L.latLngBounds(L.latLng(-85.05112878, -180), L.latLng(85.05112878, 180));
+                                                                                                                                                                            const BLANK_TILE = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+
+                                                                                                                                                                            const SafeTileLayer = L.TileLayer.extend({
+                                                                                                                                                                                getTileUrl: function (coords) {
+                                                                                                                                                                                    const limit = 2 ** coords.z;
+                                                                                                                                                                                    if (coords.x < 0 || coords.y < 0 || coords.x >= limit || coords.y >= limit) return BLANK_TILE;
+                                                                                                                                                                                    if (this.options.bounds && !this._tileCoordsToBounds(coords).intersects(this.options.bounds)) return BLANK_TILE;
+                                                                                                                                                                                    return L.TileLayer.prototype.getTileUrl.call(this, coords);
+                                                                                                                                                                                }
+                                                                                                                                                                            });
+
+let map, globe, vesselMarker, safetyCircle, startMarker, endMarker, recommendedRouteLine, currentTileLayer;
+let vesselTrackCoords = [];
+let vesselTrackLine = null;
+
+                                                                                                                                                                            let bufferRadiusNM = 5;
+                                                                                                                                                                            let isSatelliteView = false;
+                                                                                                                                                                            let customApiKey = "";
+                                                                                                                                                                            let gpsWatchId = null;
+                                                                                                                                                                            let lastGpsFix = null;
+                                                                                                                                                                            let currentSogKnots = 12.4;
+                                                                                                                                                                            let currentCogDeg = 148;
+                                                                                                                                                                            let pickingMode = null;
+                                                                                                                                                                            let activeTool = "pan";
+                                                                                                                                                                            let isDrawing = false;
+                                                                                                                                                                            let currentPolyline = null;
+                                                                                                                                                                            let drawnLayers = [];
+                                                                                                                                                                            let iceMarkers = [];
+                                                                                                                                                                            let is3DMode = true;
+                                                                                                                                                                            let viewTransitioning = false;
+                                                                                                                                                                            let suppressZoomUntil = 0;
+                                                                                                                                                                            const shipCoords = [74.8, -10.2];
+
+                                                                                                                                                                            let sampleIcebergs = [
+                                                                                                                                                                                { id: "ICE-GS-01", lat: 74.35, lng: -11.15, risk: "high", radiusNm: 9, type: "Tabular berg trên tuyến thẳng", size: "Lớn", speed: "0.8 kts SE", source: "Sentinel-1" },
+                                                                                                                                                                                { id: "ICE-GS-02", lat: 73.55, lng: -8.55, risk: "high", radiusNm: 7, type: "Cụm growler", size: "Vừa", speed: "1.1 kts S", source: "VIIRS" },
+                                                                                                                                                                                { id: "ICE-GS-03", lat: 74.85, lng: -9.4, risk: "med", radiusNm: 4.5, type: "Bergy bit", size: "Vừa", speed: "1.4 kts E", source: "Bridge report" },
+                                                                                                                                                                                { id: "ICE-GS-04", lat: 72.95, lng: -10.4, risk: "low", radiusNm: 3, type: "Brash ice", size: "Nhỏ", speed: "0.4 kts N", source: "X-band radar" }
+                                                                                                                                                                            ];
+
+                                                                                                                                                                            const nasa48hSample = [
+                                                                                                                                                                                { id: "NASA-MODIS-801", lat: 74.7, lng: -12.1, risk: "high", radiusNm: 5, type: "Mảnh vỡ 48 giờ", size: "Lớn", speed: "1.6 kts S", source: "NASA MODIS sample" },
+                                                                                                                                                                                { id: "NASA-VIIRS-802", lat: 73.9, lng: -7.6, risk: "med", radiusNm: 3.5, type: "Floe nhiệt thấp 48 giờ", size: "Vừa", speed: "1.2 kts SE", source: "NASA VIIRS sample" }
+                                                                                                                                                                            ];
+
+                                                                                                                                                                            const nasaHistorical = [
+                                                                                                                                                                                { id: "A-68", year: "2017", lat: -67.9, lng: -60.6, risk: "high", radiusNm: 18, type: "Larsen C calving A-68", size: "Khổng lồ", speed: "0.3 kts N", source: "NASA Worldview 2017" },
+                                                                                                                                                                                { id: "A-76", year: "2021", lat: -75.4, lng: -48.2, risk: "high", radiusNm: 16, type: "Ronne Ice Shelf A-76", size: "Khổng lồ", speed: "0.2 kts", source: "NASA Worldview 2021" },
+                                                                                                                                                                                { id: "A-81", year: "2023", lat: -75.5, lng: -26.1, risk: "high", radiusNm: 12, type: "Brunt Ice Shelf A-81", size: "Lớn", speed: "0.4 kts", source: "NASA Worldview 2023" },
+                                                                                                                                                                                { id: "GS-2025-01", year: "2025", lat: 75.05, lng: -13.4, risk: "high", radiusNm: 6, type: "Greenland Sea breakup 2025", size: "Lớn", speed: "1.0 kts E", source: "Operational archive 2025" }
+                                                                                                                                                                            ];
+
+                                                                                                                                                                            function formatCoordPair(lat, lng) {
+                                                                                                                                                                                const fmt = (v, pos, neg) => {
+                                                                                                                                                                                    const abs = Math.abs(v);
+                                                                                                                                                                                    const deg = Math.floor(abs);
+                                                                                                                                                                                    const minutes = ((abs - deg) * 60).toFixed(2).padStart(5, "0");
+                                                                                                                                                                                    return String(deg).padStart(2, "0") + "°" + minutes + "'" + (v >= 0 ? pos : neg);
+                                                                                                                                                                                };
+                                                                                                                                                                                return fmt(lat, "N", "S") + " " + fmt(lng, "E", "W");
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function cogLabel(deg) {
+                                                                                                                                                                                const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+                                                                                                                                                                                const rounded = ((deg % 360) + 360) % 360;
+                                                                                                                                                                                return String(Math.round(rounded)).padStart(3, "0") + "° (" + dirs[Math.round(rounded / 45) % 8] + ")";
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function bearingDeg(lat1, lng1, lat2, lng2) {
+                                                                                                                                                                                const toRad = Math.PI / 180;
+                                                                                                                                                                                const y = Math.sin((lng2 - lng1) * toRad) * Math.cos(lat2 * toRad);
+                                                                                                                                                                                const x = Math.cos(lat1 * toRad) * Math.sin(lat2 * toRad) - Math.sin(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.cos((lng2 - lng1) * toRad);
+                                                                                                                                                                                return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function setStatus(text, cls) {
+                                                                                                                                                                                const el = document.getElementById("routing-status");
+                                                                                                                                                                                el.innerText = text;
+                                                                                                                                                                                el.className = cls || "text-slate-200 font-semibold";
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function applyVesselFix(lat, lng, sogKnots, cogDeg) {
+                                                                                                                                                                                shipCoords[0] = lat;
+                                                                                                                                                                                shipCoords[1] = lng;
+                                                                                                                                                                                if (vesselMarker) {
+                                                                                                                                                                                    vesselMarker.setLatLng([lat, lng]);
+                                                                                                                                                                                    const icon = vesselMarker.getElement();
+                                                                                                                                                                                    const heading = icon && icon.querySelector(".ship-heading");
+                                                                                                                                                                                    if (heading && Number.isFinite(cogDeg)) heading.style.transform = "rotate(" + cogDeg + "deg)";
+                                                                                                                                                                                }
+                                                                                                                                                                                if (safetyCircle) safetyCircle.setLatLng([lat, lng]);
+                                                                                                                                                                                document.getElementById("header-coords").innerText = formatCoordPair(lat, lng);
+                                                                                                                                                                                if (Number.isFinite(sogKnots)) {
+                                                                                                                                                                                    currentSogKnots = sogKnots;
+                                                                                                                                                                                    document.getElementById("header-speed").innerText = sogKnots.toFixed(1) + " Knots";
+                                                                                                                                                                                }
+                                                                                                                                                                                if (Number.isFinite(cogDeg)) {
+                                                                                                                                                                                    currentCogDeg = cogDeg;
+                                                                                                                                                                                    document.getElementById("header-cog").innerText = cogLabel(cogDeg);
+                                                                                                                                                                                }
+                                                                                                                                                                                syncGlobeScene(currentRouteLatLngs());
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function onGpsPosition(position) {
+                                                                                                                                                                                const lat = position.coords.latitude;
+                                                                                                                                                                                const lng = position.coords.longitude;
+                                                                                                                                                                                const now = position.timestamp || Date.now();
+                                                                                                                                                                                let sog = currentSogKnots;
+                                                                                                                                                                                let cog = currentCogDeg;
+                                                                                                                                                                                if (Number.isFinite(position.coords.speed) && position.coords.speed >= 0) {
+                                                                                                                                                                                    sog = position.coords.speed * 1.943844;
+                                                                                                                                                                                } else if (lastGpsFix) {
+                                                                                                                                                                                    const hours = Math.max(0.0001, (now - lastGpsFix.time) / 3600000);
+                                                                                                                                                                                    const movedNm = L.latLng(lastGpsFix.lat, lastGpsFix.lng).distanceTo(L.latLng(lat, lng)) / 1852;
+                                                                                                                                                                                    if (movedNm > 0.002) sog = movedNm / hours;
+                                                                                                                                                                                }
+                                                                                                                                                                                if (Number.isFinite(position.coords.heading) && position.coords.heading >= 0) {
+                                                                                                                                                                                    cog = position.coords.heading;
+                                                                                                                                                                                } else if (lastGpsFix) {
+                                                                                                                                                                                    const movedM = L.latLng(lastGpsFix.lat, lastGpsFix.lng).distanceTo(L.latLng(lat, lng));
+                                                                                                                                                                                    if (movedM > 4) cog = bearingDeg(lastGpsFix.lat, lastGpsFix.lng, lat, lng);
+                                                                                                                                                                                }
+                                                                                                                                                                                const firstLock = !lastGpsFix;
+                                                                                                                                                                                lastGpsFix = { lat, lng, time: now };
+                                                                                                                                                                                applyVesselFix(lat, lng, sog, cog);
+                                                                                                                                                                                // Vẽ vệt đường màu đỏ phía sau tàu khi di chuyển
+                                                                                                                                                                                if (map) {
+                                                                                                                                                                                    vesselTrackCoords.push([lat, lng]);
+                                                                                                                                                                                    if (vesselTrackLine) map.removeLayer(vesselTrackLine);
+                                                                                                                                                                                    vesselTrackLine = L.polyline(vesselTrackCoords, {
+                                                                                                                                                                                        color: '#ef4444',
+                                                                                                                                                                                        weight: 4,
+                                                                                                                                                                                        opacity: 0.9
+                                                                                                                                                                                    }).addTo(map);
+                                                                                                                                                                                }
+
+                                                                                                                                                                                if (firstLock) {
+                                                                                                                                                                                    document.getElementById("start-lat").value = lat.toFixed(4);
+                                                                                                                                                                                    document.getElementById("start-lng").value = lng.toFixed(4);
+                                                                                                                                                                                    setStartPoint(lat, lng);
+                                                                                                                                                                                    if (!is3DMode && map) map.setView([lat, lng], Math.max(map.getZoom(), 8));
+                                                                                                                                                                                    setStatus("GPS khóa liên tục", "text-emerald-400 font-bold");
+                                                                                                                                                                                }
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function onGpsError(error) {
+                                                                                                                                                                                const messages = {
+                                                                                                                                                                                    1: "Đã từ chối quyền vị trí. Đang dùng tàu mô phỏng trên Greenland Sea.",
+                                                                                                                                                                                    2: "GPS thiết bị không khả dụng. Đang dùng vị trí mô phỏng.",
+                                                                                                                                                                                    3: "Hết thời gian chờ GPS. Đang dùng vị trí mô phỏng."
+                                                                                                                                                                                };
+                                                                                                                                                                                setStatus(messages[error.code] || "Không đọc được GPS.", "text-amber-400 font-semibold");
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function requestAndGetLocation() {
+                                                                                                                                                                                if (!navigator.geolocation) {
+                                                                                                                                                                                    setStatus("Trình duyệt không có Geolocation.", "text-red-400 font-bold");
+                                                                                                                                                                                    return;
+                                                                                                                                                                                }
+                                                                                                                                                                                if (gpsWatchId != null) navigator.geolocation.clearWatch(gpsWatchId);
+                                                                                                                                                                                setStatus("Đang khóa GPS thiết bị…", "text-ice-cyan font-semibold");
+                                                                                                                                                                                gpsWatchId = navigator.geolocation.watchPosition(onGpsPosition, onGpsError, {
+                                                                                                                                                                                    enableHighAccuracy: false,
+                                                                                                                                                                                    timeout: 15000,
+                                                                                                                                                                                    maximumAge: 2000
+                                                                                                                                                                                });
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function refreshMapSurface() {
+                                                                                                                                                                                if (!map) return;
+                                                                                                                                                                                map.invalidateSize({ animate: false, pan: false });
+                                                                                                                                                                                if (currentTileLayer) currentTileLayer.redraw();
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function mountTileLayer() {
+                                                                                                                                                                                if (!map) return;
+                                                                                                                                                                                if (currentTileLayer) map.removeLayer(currentTileLayer);
+                                                                                                                                                                                const key = customApiKey ? encodeURIComponent(customApiKey) : "";
+                                                                                                                                                                                const google = customApiKey.indexOf("AIza") === 0;
+                                                                                                                                                                                let url;
+                                                                                                                                                                                let attribution;
+                                                                                                                                                                                if (isSatelliteView) {
+                                                                                                                                                                                    url = google
+                                                                                                                                                                                        ? "https://mt0.google.com/vt/lyrs=s&x={x}&y={y}&z={z}&key=" + key
+                                                                                                                                                                                        : "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+                                                                                                                                                                                    attribution = google ? "Google satellite" : "Tiles &copy; Esri World Imagery";
+                                                                                                                                                                                } else {
+                                                                                                                                                                                    url = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png" + (key && !google ? "?api_key=" + key : "");
+                                                                                                                                                                                    attribution = "&copy; OpenStreetMap &copy; CARTO";
+                                                                                                                                                                                }
+                                                                                                                                                                                currentTileLayer = new SafeTileLayer(url, {
+                                                                                                                                                                                    attribution: attribution,
+                                                                                                                                                                                    bounds: TILE_BOUNDS,
+                                                                                                                                                                                    noWrap: true,
+                                                                                                                                                                                    maxZoom: 16,
+                                                                                                                                                                                    maxNativeZoom: 18,
+                                                                                                                                                                                    minZoom: 2,
+                                                                                                                                                                                    subdomains: "abcd",
+                                                                                                                                                                                    errorTileUrl: BLANK_TILE,
+                                                                                                                                                                                    updateWhenIdle: true
+                                                                                                                                                                                });
+                                                                                                                                                                                currentTileLayer.addTo(map);
+                                                                                                                                                                                setTimeout(refreshMapSurface, 50);
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function initMap() {
+                                                                                                                                                                                map = L.map("ice-map", {
+                                                                                                                                                                                    center: shipCoords,
+                                                                                                                                                                                    zoom: 6,
+                                                                                                                                                                                    zoomControl: false,
+                                                                                                                                                                                    maxBounds: TILE_BOUNDS,
+                                                                                                                                                                                    maxBoundsViscosity: 1,
+                                                                                                                                                                                    minZoom: 2,
+                                                                                                                                                                                    maxZoom: 16,
+                                                                                                                                                                                    worldCopyJump: false
+                                                                                                                                                                                });
+                                                                                                                                                                                map.attributionControl.setPosition("bottomleft");
+                                                                                                                                                                                L.control.scale({ imperial: true, metric: true, position: "bottomleft" }).addTo(map);
+                                                                                                                                                                                mountTileLayer();
+
+                                                                                                                                                                                const shipIcon = L.divIcon({
+                                                                                                                                                                                    className: "custom-ship-marker",
+                                                                                                                                                                                    html: '<div class="ship-heading relative flex items-center justify-center" style="transform:rotate(' + currentCogDeg + 'deg)"><i class="fa-solid fa-location-arrow text-ice-cyan text-xl"></i></div>',
+                                                                                                                                                                                    iconSize: [28, 28],
+                                                                                                                                                                                    iconAnchor: [14, 14]
+                                                                                                                                                                                });
+                                                                                                                                                                                vesselMarker = L.marker(shipCoords, { icon: shipIcon, zIndexOffset: 800 }).addTo(map);
+                                                                                                                                                                                renderSafetyBuffer();
+                                                                                                                                                                                renderIcebergs();
+                                                                                                                                                                                map.whenReady(refreshMapSurface);
+                                                                                                                                                                                initMapInteractions();
+                                                                                                                                                                                new ResizeObserver(() => refreshMapSurface()).observe(document.getElementById("ice-map"));
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function initMapInteractions() {
+                                                                                                                                                                                map.on("click", function (e) {
+                                                                                                                                                                                    if (!pickingMode) return;
+                                                                                                                                                                                    const lat = Number(e.latlng.lat.toFixed(4));
+                                                                                                                                                                                    const lng = Number(e.latlng.lng.toFixed(4));
+                                                                                                                                                                                    if (pickingMode === "start") {
+                                                                                                                                                                                        document.getElementById("start-lat").value = lat;
+                                                                                                                                                                                        document.getElementById("start-lng").value = lng;
+                                                                                                                                                                                        setStartPoint(lat, lng);
+                                                                                                                                                                                    } else {
+                                                                                                                                                                                        document.getElementById("end-lat").value = lat;
+                                                                                                                                                                                        document.getElementById("end-lng").value = lng;
+                                                                                                                                                                                        setEndPoint(lat, lng);
+                                                                                                                                                                                    }
+                                                                                                                                                                                    pickingMode = null;
+                                                                                                                                                                                    document.getElementById("ice-map").classList.remove("cursor-target-reticle");
+                                                                                                                                                                                });
+                                                                                                                                                                                map.on("mousedown", function (e) {
+                                                                                                                                                                                    if (activeTool !== "draw") return;
+                                                                                                                                                                                    isDrawing = true;
+                                                                                                                                                                                    map.dragging.disable();
+                                                                                                                                                                                    currentPolyline = L.polyline([e.latlng], { color: "#00F0FF", weight: 3 }).addTo(map);
+                                                                                                                                                                                    drawnLayers.push(currentPolyline);
+                                                                                                                                                                                });
+                                                                                                                                                                                map.on("mousemove", function (e) {
+                                                                                                                                                                                    if (activeTool === "draw" && isDrawing && currentPolyline) currentPolyline.addLatLng(e.latlng);
+                                                                                                                                                                                });
+                                                                                                                                                                                map.on("mouseup", function () {
+                                                                                                                                                                                    if (activeTool !== "draw") return;
+                                                                                                                                                                                    isDrawing = false;
+                                                                                                                                                                                });
+                                                                                                                                                                                map.on("dblclick", function () {
+                                                                                                                                                                                    if (activeTool !== "draw" || !currentPolyline) return;
+                                                                                                                                                                                    const pts = currentPolyline.getLatLngs();
+                                                                                                                                                                                    if (pts.length >= 3) {
+                                                                                                                                                                                        map.removeLayer(currentPolyline);
+                                                                                                                                                                                        drawnLayers = drawnLayers.filter((layer) => layer !== currentPolyline);
+                                                                                                                                                                                        const poly = L.polygon(pts, { color: "#00F0FF", weight: 2, fillColor: "#00F0FF", fillOpacity: 0.12 }).addTo(map);
+                                                                                                                                                                                        drawnLayers.push(poly);
+                                                                                                                                                                                    }
+                                                                                                                                                                                    currentPolyline = null;
+                                                                                                                                                                                    isDrawing = false;
+                                                                                                                                                                                });
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function setMapTool(tool) {
+                                                                                                                                                                                activeTool = tool;
+                                                                                                                                                                                document.getElementById("tool-pan").className = tool === "pan"
+                                                                                                                                                                                    ? "p-2 rounded-lg text-ice-cyan bg-navy-700 border border-ice-cyan/40"
+                                                                                                                                                                                    : "p-2 rounded-lg text-slate-400";
+                                                                                                                                                                                document.getElementById("tool-draw").className = tool === "draw"
+                                                                                                                                                                                    ? "p-2 rounded-lg text-ice-cyan bg-navy-700 border border-ice-cyan/40"
+                                                                                                                                                                                    : "p-2 rounded-lg text-slate-400";
+                                                                                                                                                                                if (tool === "draw") {
+                                                                                                                                                                                    if (is3DMode) {
+                                                                                                                                                                                        const pov = globe ? globe.pointOfView() : { lat: shipCoords[0], lng: shipCoords[1] };
+                                                                                                                                                                                        show2DMap(pov.lat, pov.lng, 7);
+                                                                                                                                                                                    }
+                                                                                                                                                                                    map.dragging.disable();
+                                                                                                                                                                                    map.doubleClickZoom.disable();
+                                                                                                                                                                                } else {
+                                                                                                                                                                                    map.dragging.enable();
+                                                                                                                                                                                    map.doubleClickZoom.enable();
+                                                                                                                                                                                }
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function clearUserDrawings() {
+                                                                                                                                                                                drawnLayers.forEach((layer) => map.removeLayer(layer));
+                                                                                                                                                                                drawnLayers = [];
+                                                                                                                                                                                currentPolyline = null;
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function applyCustomApiKey() {
+                                                                                                                                                                                customApiKey = document.getElementById("custom-api-key").value.trim();
+                                                                                                                                                                                mountTileLayer();
+                                                                                                                                                                                setStatus(customApiKey ? "Đã gắn API key vào lớp bản đồ." : "Đã xoá API key. Dùng lớp công khai.", "text-amber-300 font-semibold");
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function pickOnMap(mode) {
+                                                                                                                                                                                if (is3DMode) show2DMap(shipCoords[0], shipCoords[1], 7);
+                                                                                                                                                                                pickingMode = mode;
+                                                                                                                                                                                document.getElementById("ice-map").classList.add("cursor-target-reticle");
+                                                                                                                                                                                setStatus(mode === "start" ? "Chọn điểm bắt đầu trên bản đồ" : "Chọn điểm đến trên bản đồ", "text-ice-cyan font-semibold");
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function markerIcon(color, icon) {
+                                                                                                                                                                                return L.divIcon({
+                                                                                                                                                                                    className: "",
+                                                                                                                                                                                    html: '<div class="w-7 h-7 rounded-full border-2 border-white flex items-center justify-center shadow-lg" style="background:' + color + '"><i class="fa-solid ' + icon + ' text-xs text-navy-900"></i></div>',
+                                                                                                                                                                                    iconSize: [28, 28],
+                                                                                                                                                                                    iconAnchor: [14, 14]
+                                                                                                                                                                                });
+                                                                                                                                                                            }
+
+function setStartPoint(lat, lng) {
+    if (recommendedRouteLine) { map.removeLayer(recommendedRouteLine); recommendedRouteLine = null; }
+    if (startMarker) map.removeLayer(startMarker);
+    startMarker = L.marker([lat, lng], { icon: markerIcon("#10b981", "fa-play") }).addTo(map).bindPopup("Điểm bắt đầu");
+}
+function setEndPoint(lat, lng) {
+    if (recommendedRouteLine) { map.removeLayer(recommendedRouteLine); recommendedRouteLine = null; }
+    if (endMarker) map.removeLayer(endMarker);
+    endMarker = L.marker([lat, lng], { icon: markerIcon("#ef4444", "fa-flag") }).addTo(map).bindPopup("Điểm đến");
+}
+
+                                                                                                                                                                            function obstaclePayload() {
+                                                                                                                                                                                return sampleIcebergs.map((ice) => ({
+                                                                                                                                                                                    id: ice.id,
+                                                                                                                                                                                    lat: ice.lat,
+                                                                                                                                                                                    lng: ice.lng,
+                                                                                                                                                                                    risk: ice.risk,
+                                                                                                                                                                                    radiusNm: ice.radiusNm || (ice.risk === "high" ? 6 : ice.risk === "low" ? 2 : 3.5)
+                                                                                                                                                                                }));
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function currentRouteLatLngs() {
+                                                                                                                                                                                if (!recommendedRouteLine) return null;
+                                                                                                                                                                                return recommendedRouteLine.getLatLngs().map((p) => [p.lat, p.lng]);
+                                                                                                                                                                            }
+
+                                                                                                                                                                            async function startExpandingRouteSimulation() {
+                                                                                                                                                                                const sLat = parseFloat(document.getElementById("start-lat").value);
+                                                                                                                                                                                const sLng = parseFloat(document.getElementById("start-lng").value);
+                                                                                                                                                                                const eLat = parseFloat(document.getElementById("end-lat").value);
+                                                                                                                                                                                const eLng = parseFloat(document.getElementById("end-lng").value);
+                                                                                                                                                                                if (![sLat, sLng, eLat, eLng].every(Number.isFinite)) {
+                                                                                                                                                                                    setStatus("Tọa độ không hợp lệ", "text-red-400 font-bold");
+                                                                                                                                                                                    return;
+                                                                                                                                                                                }
+                                                                                                                                                                               
+                                                                                                                                                                                setStartPoint(sLat, sLng);
+                                                                                                                                                                                setEndPoint(eLat, eLng);
+                                                                                                                                                                                if (is3DMode) show2DMap(sLat, sLng, 6);
+                                                                                                                                                                                if (recommendedRouteLine) map.removeLayer(recommendedRouteLine);
+                                                                                                                                                                                setStatus("A* server đang né băng…", "text-ice-cyan font-bold");
+                                                                                                                                                                                try {
+                                                                                                                                                                                    const res = await fetch(API_ROUTE, {
+                                                                                                                                                                                        method: "POST",
+                                                                                                                                                                                        headers: { "Content-Type": "application/json" },
+                                                                                                                                                                                        body: JSON.stringify({
+                                                                                                                                                                                            start: [sLat, sLng],
+                                                                                                                                                                                            end: [eLat, eLng],
+                                                                                                                                                                                            bufferRadius: bufferRadiusNM,
+                                                                                                                                                                                            speedKnots: currentSogKnots || 12.4,
+                                                                                                                                                                                            obstacles: obstaclePayload()
+                                                                                                                                                                                        })
+                                                                                                                                                                                    });
+                                                                                                                                                                                    const data = await res.json();
+                                                                                                                                                                                    if (!res.ok) throw new Error(data.error || "Route request failed");
+                                                                                                                                                                                    const latlngs = data.route.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+                                                                                                                                                                                    recommendedRouteLine = L.polyline(latlngs, { color: "#00F0FF", weight: 4, opacity: 0.95 }).addTo(map);
+                                                                                                                                                                                    map.fitBounds(recommendedRouteLine.getBounds().pad(0.35), { animate: false });
+                                                                                                                                                                                    refreshMapSurface();
+                                                                                                                                                                                    document.getElementById("route-distance").innerText = data.distanceNm.toFixed(1) + " NM";
+                                                                                                                                                                                    document.getElementById("fuel-saving").innerText = data.fuelSavingPercent > 0 ? "~ " + Number(data.fuelSavingPercent).toFixed(1) + "%" : "0%";
+                                                                                                                                                                                    const nearest = (data.tcpa || []).find((row) => row.level !== "clear") || (data.tcpa || [])[0];
+                                                                                                                                                                                    document.getElementById("route-tcpa").innerText = nearest
+                                                                                                                                                                                        ? nearest.id + " · " + nearest.tcpaMinutes + " phút · CPA " + nearest.cpaDistanceNm + " NM"
+                                                                                                                                                                                        : "Không có mục tiêu";
+                                                                                                                                                                                    const avoided = (data.obstaclesAvoided || []).length;
+                                                                                                                                                                                    setStatus(avoided ? "A* né " + avoided + " mục tiêu · " + data.distanceNm.toFixed(1) + " NM" : "Tuyến thẳng an toàn · " + data.distanceNm.toFixed(1) + " NM", "text-emerald-400 font-bold");
+                                                                                                                                                                                    syncGlobeScene(latlngs);
+                                                                                                                                                                                } catch (err) {
+                                                                                                                                                                                    setStatus("Server offline: " + err.message, "text-red-400 font-bold");
+                                                                                                                                                                                }
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function toggleMapTileLayer() {
+                                                                                                                                                                                isSatelliteView = !isSatelliteView;
+                                                                                                                                                                                mountTileLayer();
+                                                                                                                                                                                const btn = document.getElementById("btn-toggle-map");
+                                                                                                                                                                                const label = document.getElementById("map-mode-label");
+                                                                                                                                                                                if (isSatelliteView) {
+                                                                                                                                                                                    btn.innerHTML = "Ra-đa đêm";
+                                                                                                                                                                                    label.innerText = "CHẾ ĐỘ VỆ TINH TRÁI ĐẤT";
+                                                                                                                                                                                } else {
+                                                                                                                                                                                    btn.innerHTML = "Vệ tinh Trái Đất";
+                                                                                                                                                                                    label.innerText = "CHẾ ĐỘ RA-ĐA SAR";
+                                                                                                                                                                                }
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function renderSafetyBuffer() {
+                                                                                                                                                                                if (!map) return;
+                                                                                                                                                                                if (safetyCircle) map.removeLayer(safetyCircle);
+                                                                                                                                                                                safetyCircle = L.circle(shipCoords, {
+                                                                                                                                                                                    radius: bufferRadiusNM * 1852,
+                                                                                                                                                                                    color: "#00F0FF",
+                                                                                                                                                                                    weight: 1.5,
+                                                                                                                                                                                    dashArray: "4, 4",
+                                                                                                                                                                                    fillColor: "#00F0FF",
+                                                                                                                                                                                    fillOpacity: 0.08
+                                                                                                                                                                                }).addTo(map);
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function updateBufferRadius(val) {
+                                                                                                                                                                                bufferRadiusNM = parseFloat(val);
+                                                                                                                                                                                document.getElementById("buffer-val-display").innerText = bufferRadiusNM.toFixed(1) + " NM";
+                                                                                                                                                                                renderSafetyBuffer();
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function toggleIceFilter(riskType) {
+                                                                                                                                                                                iceMarkers.forEach((marker) => {
+                                                                                                                                                                                    if (marker.riskLevel !== riskType) return;
+                                                                                                                                                                                    if (map.hasLayer(marker)) map.removeLayer(marker);
+                                                                                                                                                                                    else marker.addTo(map);
+                                                                                                                                                                                });
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function riskColor(risk) {
+                                                                                                                                                                                if (risk === "high") return "#ff2a6d";
+                                                                                                                                                                                if (risk === "low") return "#06d6a0";
+                                                                                                                                                                                return "#ffb703";
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function renderIcebergs() {
+                                                                                                                                                                                iceMarkers.forEach((marker) => map.removeLayer(marker));
+                                                                                                                                                                                iceMarkers = [];
+                                                                                                                                                                                sampleIcebergs.forEach((ice) => {
+                                                                                                                                                                                    const marker = L.circleMarker([ice.lat, ice.lng], {
+                                                                                                                                                                                        radius: 7,
+                                                                                                                                                                                        color: "#ffffff",
+                                                                                                                                                                                        weight: 1,
+                                                                                                                                                                                        fillColor: riskColor(ice.risk),
+                                                                                                                                                                                        fillOpacity: 0.95
+                                                                                                                                                                                    }).addTo(map);
+                                                                                                                                                                                    marker.riskLevel = ice.risk;
+                                                                                                                                                                                    marker.bindPopup("<b>" + ice.id + "</b><br>" + (ice.type || "") + "<br>" + (ice.source || ""));
+                                                                                                                                                                                    iceMarkers.push(marker);
+                                                                                                                                                                                });
+                                                                                                                                                                                syncGlobeScene(currentRouteLatLngs());
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function noteIngest(items, label) {
+                                                                                                                                                                                const list = document.getElementById("nasa-ingested-list");
+                                                                                                                                                                                const html = items.map((item) => '<div class="bg-navy-900/80 p-2 rounded border border-navy-600/40"><b class="text-ice-cyan">' + item.id + "</b> · " + (item.source || label) + "</div>").join("");
+                                                                                                                                                                                list.innerHTML = html || "Không có điểm trong vùng.";
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function mergeIce(items) {
+                                                                                                                                                                                items.forEach((item) => {
+                                                                                                                                                                                    if (!sampleIcebergs.some((row) => row.id === item.id)) sampleIcebergs.push(item);
+                                                                                                                                                                                });
+                                                                                                                                                                                renderIcebergs();
+                                                                                                                                                                            }
+
+                                                                                                                                                                            async function loadNasa48h() {
+                                                                                                                                                                                const key = document.getElementById("firms-key").value.trim();
+                                                                                                                                                                                const bounds = map.getBounds();
+                                                                                                                                                                                const params = new URLSearchParams({
+                                                                                                                                                                                    key: key,
+                                                                                                                                                                                    south: bounds.getSouth().toFixed(3),
+                                                                                                                                                                                    north: bounds.getNorth().toFixed(3),
+                                                                                                                                                                                    west: bounds.getWest().toFixed(3),
+                                                                                                                                                                                    east: bounds.getEast().toFixed(3),
+                                                                                                                                                                                    days: "2"
+                                                                                                                                                                                });
+                                                                                                                                                                                setStatus("Đang hỏi NASA FIRMS…", "text-ice-cyan font-semibold");
+                                                                                                                                                                                try {
+                                                                                                                                                                                    const res = await fetch("http://localhost:3000/api/firms?" + params.toString());
+                                                                                                                                                                                    const data = await res.json();
+                                                                                                                                                                                    const features = (data.features && data.features.length) ? data.features : nasa48hSample;
+                                                                                                                                                                                    mergeIce(features.map((row) => Object.assign({ radiusNm: row.risk === "high" ? 5 : 3, size: "Live", speed: "—" }, row)));
+                                                                                                                                                                                    noteIngest(features, data.source || "48h");
+                                                                                                                                                                                    if (features[0]) show2DMap(features[0].lat, features[0].lng, 6);
+                                                                                                                                                                                    setStatus(data.source === "firms" ? "FIRMS 48h: " + features.length + " điểm" : "Không có key FIRMS — đã nạp mẫu 48h", "text-emerald-400 font-semibold");
+                                                                                                                                                                                } catch (err) {
+                                                                                                                                                                                    mergeIce(nasa48hSample);
+                                                                                                                                                                                    noteIngest(nasa48hSample, "sample");
+                                                                                                                                                                                    setStatus("FIRMS offline, dùng mẫu 48h", "text-amber-400 font-semibold");
+                                                                                                                                                                                }
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function loadNasaHistoricalData() {
+                                                                                                                                                                                const year = document.getElementById("nasa-year-select").value;
+                                                                                                                                                                                const picked = nasaHistorical.filter((item) => year === "all" || item.year === year);
+                                                                                                                                                                                mergeIce(picked);
+                                                                                                                                                                                noteIngest(picked, "historical");
+                                                                                                                                                                                if (picked[0]) show2DMap(picked[0].lat, picked[0].lng, year === "2025" ? 6 : 4);
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function handleNasaFileUpload(input) {
+                                                                                                                                                                                const file = input.files && input.files[0];
+                                                                                                                                                                                if (!file) return;
+                                                                                                                                                                                const reader = new FileReader();
+                                                                                                                                                                                reader.onload = () => {
+                                                                                                                                                                                    try {
+                                                                                                                                                                                        const data = JSON.parse(reader.result);
+                                                                                                                                                                                        const rows = Array.isArray(data) ? data : (data.features || data.icebergs || []);
+                                                                                                                                                                                        const parsed = rows.map((row, index) => {
+                                                                                                                                                                                            const geom = row.geometry && row.geometry.coordinates;
+                                                                                                                                                                                            const lng = geom ? Number(geom[0]) : Number(row.lng != null ? row.lng : row.lon);
+                                                                                                                                                                                            const lat = geom ? Number(geom[1]) : Number(row.lat);
+                                                                                                                                                                                            return {
+                                                                                                                                                                                                id: String(row.id || row.properties && row.properties.id || ("FILE-" + (index + 1))),
+                                                                                                                                                                                                lat: lat,
+                                                                                                                                                                                                lng: lng,
+                                                                                                                                                                                                risk: (row.risk || (row.properties && row.properties.risk) || "med"),
+                                                                                                                                                                                                radiusNm: Number(row.radiusNm) || 4,
+                                                                                                                                                                                                type: row.type || (row.properties && row.properties.type) || "Imported ice",
+                                                                                                                                                                                                source: file.name
+                                                                                                                                                                                            };
+                                                                                                                                                                                        }).filter((row) => Number.isFinite(row.lat) && Number.isFinite(row.lng));
+                                                                                                                                                                                        mergeIce(parsed);
+                                                                                                                                                                                        noteIngest(parsed, file.name);
+                                                                                                                                                                                        if (parsed[0]) show2DMap(parsed[0].lat, parsed[0].lng, 6);
+                                                                                                                                                                                    } catch (err) {
+                                                                                                                                                                                        setStatus("File JSON không đọc được", "text-red-400 font-bold");
+                                                                                                                                                                                    }
+                                                                                                                                                                                };
+                                                                                                                                                                                reader.readAsText(file);
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function switchLeftTab(tab) {
+                                                                                                                                                                                ["nav", "nasa", "crowd"].forEach((name) => {
+                                                                                                                                                                                    document.getElementById("tab-" + name + "-btn").className = "py-2.5 rounded-md text-center text-slate-400";
+                                                                                                                                                                                    document.getElementById("panel-" + name).classList.add("hidden");
+                                                                                                                                                                                });
+                                                                                                                                                                                document.getElementById("tab-" + tab + "-btn").className = "py-2.5 rounded-md text-center text-ice-cyan bg-navy-700 border border-ice-cyan/30";
+                                                                                                                                                                                document.getElementById("panel-" + tab).classList.remove("hidden");
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function focusOnShip() {
+                                                                                                                                                                                show2DMap(shipCoords[0], shipCoords[1], 8);
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function resetMapView() {
+                                                                                                                                                                                show3DGlobe(74.2, -12);
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function toggleSimulationAlert() {
+                                                                                                                                                                                document.getElementById("red-alert-banner").classList.toggle("hidden");
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function dismissAlert() {
+                                                                                                                                                                                document.getElementById("red-alert-banner").classList.add("hidden");
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function initCrowdFeed() {
+                                                                                                                                                                                document.getElementById("crowd-feed-list").innerHTML = '<div class="bg-navy-900/80 p-2 rounded border border-navy-600/30 text-slate-300">Sẵn sàng nhận báo cáo thuyền viên. Điểm mới được đưa vào lần tính A* tiếp theo.</div>';
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function submitCrowdsourcedIce(event) {
+                                                                                                                                                                                event.preventDefault();
+                                                                                                                                                                                const lat = parseFloat(document.getElementById("ice-lat").value);
+                                                                                                                                                                                const lng = parseFloat(document.getElementById("ice-lng").value);
+                                                                                                                                                                                const size = document.getElementById("ice-size").value;
+                                                                                                                                                                                const notes = document.getElementById("ice-notes").value.trim();
+                                                                                                                                                                                const ice = {
+                                                                                                                                                                                    id: "CROWD-" + Math.floor(100 + Math.random() * 900),
+                                                                                                                                                                                    lat: lat,
+                                                                                                                                                                                    lng: lng,
+                                                                                                                                                                                    risk: size === "Large" ? "high" : size === "Small" ? "low" : "med",
+                                                                                                                                                                                    radiusNm: size === "Large" ? 6 : size === "Small" ? 2 : 3.5,
+                                                                                                                                                                                    type: notes || "Quan sát thực địa",
+                                                                                                                                                                                    size: size,
+                                                                                                                                                                                    source: "Crowdsourced"
+                                                                                                                                                                                };
+                                                                                                                                                                                sampleIcebergs.push(ice);
+                                                                                                                                                                                renderIcebergs();
+                                                                                                                                                                                show2DMap(lat, lng, 8);
+                                                                                                                                                                                const feed = document.getElementById("crowd-feed-list");
+                                                                                                                                                                                feed.insertAdjacentHTML("afterbegin", '<div class="bg-navy-900/80 p-2 rounded border border-navy-600/30"><b class="text-ice-cyan">' + ice.id + "</b> · " + size + " · " + lat.toFixed(3) + ", " + lng.toFixed(3) + "</div>");
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function updateViewButton() {
+                                                                                                                                                                                const btn = document.getElementById("btn-view-mode");
+                                                                                                                                                                                btn.innerHTML = is3DMode ? "<b>3D Globe</b> / 2D Map" : "3D Globe / <b>2D Map</b>";
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function show2DMap(lat, lng, zoom) {
+                                                                                                                                                                                const container = document.getElementById("globe-container");
+                                                                                                                                                                                is3DMode = false;
+                                                                                                                                                                                updateViewButton();
+                                                                                                                                                                                viewTransitioning = true;
+                                                                                                                                                                                container.style.pointerEvents = "none";
+                                                                                                                                                                                container.style.opacity = "0";
+                                                                                                                                                                                setTimeout(() => {
+                                                                                                                                                                                    container.style.visibility = "hidden";
+                                                                                                                                                                                    if (map && Number.isFinite(lat) && Number.isFinite(lng)) {
+                                                                                                                                                                                        map.setView([lat, lng], zoom || map.getZoom() || 7, { animate: false });
+                                                                                                                                                                                    }
+                                                                                                                                                                                    refreshMapSurface();
+                                                                                                                                                                                    setTimeout(refreshMapSurface, 280);
+                                                                                                                                                                                    viewTransitioning = false;
+                                                                                                                                                                                }, 700);
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function show3DGlobe(lat, lng) {
+                                                                                                                                                                                const container = document.getElementById("globe-container");
+                                                                                                                                                                                is3DMode = true;
+                                                                                                                                                                                updateViewButton();
+                                                                                                                                                                                suppressZoomUntil = Date.now() + 1300;
+                                                                                                                                                                                container.style.visibility = "visible";
+                                                                                                                                                                                container.style.pointerEvents = "auto";
+                                                                                                                                                                                requestAnimationFrame(() => { container.style.opacity = "1"; });
+                                                                                                                                                                                const center = map ? map.getCenter() : { lat: shipCoords[0], lng: shipCoords[1] };
+                                                                                                                                                                                if (globe) {
+                                                                                                                                                                                    globe.pointOfView({
+                                                                                                                                                                                        lat: lat != null ? lat : center.lat,
+                                                                                                                                                                                        lng: lng != null ? lng : center.lng,
+                                                                                                                                                                                        altitude: 2.2
+                                                                                                                                                                                    }, 900);
+                                                                                                                                                                                }
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function toggleViewMode() {
+                                                                                                                                                                                if (is3DMode) {
+                                                                                                                                                                                    const pov = globe ? globe.pointOfView() : { lat: shipCoords[0], lng: shipCoords[1] };
+                                                                                                                                                                                    show2DMap(pov.lat, pov.lng, 7);
+                                                                                                                                                                                } else {
+                                                                                                                                                                                    const center = map.getCenter();
+                                                                                                                                                                                    show3DGlobe(center.lat, center.lng);
+                                                                                                                                                                                }
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function syncGlobeScene(routeLatLngs) {
+                                                                                                                                                                                if (!globe) return;
+                                                                                                                                                                                const points = sampleIcebergs.concat([{
+                                                                                                                                                                                    id: "VESSEL",
+                                                                                                                                                                                    lat: shipCoords[0],
+                                                                                                                                                                                    lng: shipCoords[1],
+                                                                                                                                                                                    risk: "ship"
+                                                                                                                                                                                }]);
+                                                                                                                                                                                globe
+                                                                                                                                                                                    .pointsData(points)
+                                                                                                                                                                                    .pointLat((d) => d.lat)
+                                                                                                                                                                                    .pointLng((d) => d.lng)
+                                                                                                                                                                                    .pointColor((d) => d.risk === "ship" ? "#00f0ff" : riskColor(d.risk))
+                                                                                                                                                                                    .pointAltitude((d) => d.risk === "ship" ? 0.02 : 0.01)
+                                                                                                                                                                                    .pointRadius((d) => d.risk === "ship" ? 0.35 : 0.18)
+                                                                                                                                                                                    .pointLabel((d) => d.id);
+                                                                                                                                                                                if (routeLatLngs && routeLatLngs.length > 1) {
+                                                                                                                                                                                    globe
+                                                                                                                                                                                        .pathsData([{ path: routeLatLngs }])
+                                                                                                                                                                                        .pathPoints("path")
+                                                                                                                                                                                        .pathPointLat((p) => p[0])
+                                                                                                                                                                                        .pathPointLng((p) => p[1])
+                                                                                                                                                                                        .pathColor(() => "#00f0ff")
+                                                                                                                                                                                        .pathStroke(0.7)
+                                                                                                                                                                                        .pathPointAlt(() => 0.012);
+                                                                                                                                                                                }
+                                                                                                                                                                            }
+
+                                                                                                                                                                            function init3DGlobe() {
+                                                                                                                                                                                const container = document.getElementById("globe-container");
+                                                                                                                                                                                if (typeof Globe !== "function") {
+                                                                                                                                                                                    show2DMap(shipCoords[0], shipCoords[1], 6);
+                                                                                                                                                                                    return;
+                                                                                                                                                                                }
+                                                                                                                                                                                try {
+                                                                                                                                                                                    globe = Globe()(container)
+                                                                                                                                                                                        .globeImageUrl("//unpkg.com/three-globe/example/img/earth-night.jpg")
+                                                                                                                                                                                        .bumpImageUrl("//unpkg.com/three-globe/example/img/earth-topology.png")
+                                                                                                                                                                                        .backgroundImageUrl("//unpkg.com/three-globe/example/img/night-sky.png")
+                                                                                                                                                                                        .showAtmosphere(true)
+                                                                                                                                                                                        .atmosphereColor("#48cae4")
+                                                                                                                                                                                        .atmosphereAltitude(0.18)
+                                                                                                                                                                                        .pointOfView({ lat: shipCoords[0], lng: shipCoords[1], altitude: 2.4 });
+                                                                                                                                                                                    syncGlobeScene();
+                                                                                                                                                                                    globe.onZoom(({ altitude }) => {
+                                                                                                                                                                                        if (Date.now() < suppressZoomUntil || viewTransitioning || !is3DMode) return;
+                                                                                                                                                                                        if (altitude < 0.6) {
+                                                                                                                                                                                            const pov = globe.pointOfView();
+                                                                                                                                                                                            show2DMap(pov.lat, pov.lng, 7);
+                                                                                                                                                                                        }
+                                                                                                                                                                                    });
+                                                                                                                                                                                    updateViewButton();
+                                                                                                                                                                                } catch (err) {
+                                                                                                                                                                                    console.error(err);
+                                                                                                                                                                                    show2DMap(shipCoords[0], shipCoords[1], 6);
+                                                                                                                                                                                }
+                                                                                                                                                                            }
+
+                                                                                                                                                                            async function pingRouteServer() {
+                                                                                                                                                                                try {
+                                                                                                                                                                                    const res = await fetch("http://localhost:3000/api/health");
+                                                                                                                                                                                    if (!res.ok) throw new Error("offline");
+                                                                                                                                                                                    if (!lastGpsFix) setStatus("A* server sẵn sàng", "text-emerald-400 font-semibold");
+                                                                                                                                                                                } catch (err) {
+                                                                                                                                                                                    if (!lastGpsFix) setStatus("Chưa thấy server :3000 — chạy npm start", "text-amber-400 font-semibold");
+                                                                                                                                                                                }
+                                                                                                                                                                            }
+
+                                                                                                                                                                            window.addEventListener("resize", refreshMapSurface);
+                                                                                                                                                                            window.onload = function () {
+                                                                                                                                                                                document.getElementById("header-coords").innerText = formatCoordPair(shipCoords[0], shipCoords[1]);
+                                                                                                                                                                                document.getElementById("header-speed").innerText = currentSogKnots.toFixed(1) + " Knots";
+                                                                                                                                                                                document.getElementById("header-cog").innerText = cogLabel(currentCogDeg);
+                                                                                                                                                                                setInterval(() => {
+                                                                                                                                                                                    document.getElementById("system-clock").innerText = new Date().toUTCString().split(" ")[4] + " UTC";
+                                                                                                                                                                                }, 1000);
+                                                                                                                                                                                initMap();
+                                                                                                                                                                                init3DGlobe();
+                                                                                                                                                                                initCrowdFeed();
+                                                                                                                                                                                requestAndGetLocation();
+                                                                                                                                                                                pingRouteServer();
+                                                                                                                                                                            };
+        </script>
+        <!-- Script điều khiển lưu tên tàu thông minh vào bộ nhớ hệ thống -->
+        <script>
+                    function showLoading(title, subtitle) {
+                        var splash = document.getElementById('splash-screen');
+                        if (splash) {
+                            if (title) document.getElementById('splash-loading-text').innerText = title;
+                            if (subtitle) document.getElementById('splash-loading-subtext').innerText = subtitle;
+                            splash.style.display = 'flex';
+                            splash.classList.remove('hidden-splash');
+                        }
+                    }
+
+                    function hideLoading() {
+                        var splash = document.getElementById('splash-screen');
+                        if (splash) {
+                            splash.classList.add('hidden-splash');
+                            setTimeout(function() { splash.style.display = 'none'; }, 500);
+                        }
+                    }
+
+                    function startMyApplication() {
+                        var welcome = document.getElementById('welcome-screen');
+                        var inputName = document.getElementById('input-vessel-name');
+                        var displayName = document.getElementById('display-vessel-name');
+
+                        if (welcome) {
+                            // 1. Lưu tên tàu mới vào bộ nhớ trình duyệt để ép hệ thống đồng bộ
+                            if (inputName) {
+                                var newName = inputName.value.trim().toUpperCase();
+                                if (newName === "") newName = "ARCTIC EXPLORER I";
+
+                                localStorage.setItem('savedVesselName', newName);
+
+                                // Đồng bộ trực tiếp lên giao diện ngay lập tức
+                                if (displayName) displayName.innerText = newName;
+
+                                // Đề phòng ID bị lệch, tìm mọi thẻ chứa tên tàu gốc để đè chữ mới vào
+                                document.querySelectorAll('span, div').forEach(function(el) {
+                                    if (el.innerText === "ARCTIC EXPLORER I") {
+                                        el.id = "display-vessel-name"; // Tự động gắn ID chuẩn cho thẻ đó
+                                        el.innerText = newName;
+                                    }
+                                });
+                            }
+
+                            // 2. Chuyển cảnh hiệu ứng mở đầu mượt mà
+                            welcome.style.opacity = '0';
+                            welcome.style.visibility = 'hidden';
+                            setTimeout(function() { welcome.style.display = 'none'; }, 600);
+
+                            showLoading("LOADING SYSTEM...", "Syncing with live GPS satellites...");
+
+                            setTimeout(function() {
+                                hideLoading();
+                                // Đọc lại một lần nữa sau khi load xong để chống mã nguồn gốc ghi đè đè chữ cũ
+                                var savedName = localStorage.getItem('savedVesselName');
+                                var targetDisplay = document.getElementById('display-vessel-name');
+                                if (savedName && targetDisplay) targetDisplay.innerText = savedName;
+                            }, 3000);
+                        }
+                    }
+
+                    // Tự động kiểm tra bộ nhớ khi vừa mở trang, nếu có tên tàu cũ thì tự nạp vào ô Input luôn
+                    document.addEventListener('DOMContentLoaded', function() {
+                        var savedName = localStorage.getItem('savedVesselName');
+                        var inputField = document.getElementById('input-vessel-name');
+                        if (savedName && inputField) {
+                            inputField.value = savedName;
+                        }
+                    });
+function flyToShipCamera() {
+    if (typeof shipCoords === 'undefined' || !shipCoords || shipCoords.length < 2) {
+        alert("Hệ thống chưa xác định được tọa độ tàu!");
+        return;
+    }
+
+    // Kiểm tra kỹ xem trên màn hình code của bạn có đủ [0] và [1] chưa
+    var lat = shipCoords[0];
+    var lon = shipCoords[1];
+
+    // 1. Bay camera trên Quả địa cầu 3D (globe)
+    if (typeof globe !== 'undefined' && typeof globe.pointOfView === 'function') {
+        globe.pointOfView({ lat: lat, lng: lon, altitude: 0.4 }, 1500);
+    }
+
+    // 2. Chuyển góc nhìn trên Bản đồ 2D (nếu đang mở chế độ 2D)
+    if (typeof is3DView !== 'undefined' && !is3DView && typeof show2DMap === 'function') {
+        show2DMap(lat, lon, 12);
+    } else if (typeof map !== 'undefined' && typeof map.flyTo === 'function') {
+        map.flyTo([lat, lon], 12, { duration: 1.5 });
+    }
+}
+function startMyApplication() {
+    var welcome = document.getElementById('welcome-screen');
+    var inputName = document.getElementById('input-vessel-name');
+    var displayName = document.getElementById('display-vessel-name');
+
+    if (welcome) {
+        // 1. Đổi tên tàu
+        if (inputName && displayName) {
+            var newName = inputName.value.trim();
+            displayName.innerText = newName !== "" ? newName.toUpperCase() : "ARCTIC EXPLORER I";
+        }
+
+        // 2. Gọi chính hàm GPS gốc siêu xịn của bạn
+        if (typeof requestAndGetLocation === "function") {
+            requestAndGetLocation();
+        }
+
+        // 3. Chuyển cảnh Launch -> Loading -> Vào App
+        welcome.style.opacity = '0';
+        welcome.style.visibility = 'hidden';
+        setTimeout(function () { welcome.style.display = 'none'; }, 600);
+
+        showLoading("LOADING SYSTEM...", "Syncing with live GPS satellites...");
+        setTimeout(function () { hideLoading(); }, 3000);
+    }
+}
+
+        </script>
+    </body>
+</html>
+

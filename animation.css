@@ -1,0 +1,74 @@
+/* Khung chứa tảng băng */
+.splash-iceberg {
+    position: relative;
+    width: 150px;
+    height: 150px;
+    margin: 0 auto;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+/* Định hình cho Icon tảng băng hệ thống */
+.splash-icon-ice {
+    font-size: 80px; /* Độ to của tảng băng */
+    color: #48cae4; /* Màu xanh neon đồng bộ với chữ ICE FLOW */
+    animation: dapDenh 3s infinite ease-in-out;
+    z-index: 2;
+}
+
+/* Hiệu ứng sóng biển mờ ở dưới chân tảng băng */
+.sea-wave {
+    position: absolute;
+    bottom: 25px;
+    width: 100px;
+    height: 10px;
+    background: rgba(72, 202, 228, 0.4);
+    border-radius: 50%;
+    filter: blur(2px);
+    animation: songBien 3s infinite ease-in-out;
+    z-index: 1;
+}
+
+/* Định nghĩa chuyển động dập dềnh */
+@keyframes dapDenh {
+    0%, 100% {
+        transform: translateY(0) rotate(0deg);
+    }
+
+    50% {
+        transform: translateY(-12px) rotate(3deg);
+    }
+    /* Dập dềnh lên xuống và nghiêng nhẹ */
+}
+
+/* Định nghĩa chuyển động của sóng biển */
+@keyframes songBien {
+    0%, 100% {
+        transform: scale(1);
+        opacity: 0.6;
+    }
+
+    50% {
+        transform: scale(1.3);
+        opacity: 0.2;
+    }
+}
+/* 1. Định nghĩa chuyển động xoay tròn chậm rãi, mượt mà */
+@keyframes bongTuyetXoay {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* 2. Tạo class áp dụng cho bông tuyết ở góc trái menu */
+.menu-snowflake-rotate {
+    /* Xoay đều vô tận | Đổi 8s thành 4s nếu muốn xoay nhanh hơn */
+    animation: bongTuyetXoay 8s linear infinite;
+    display: inline-block; /* Bắt buộc phải có để thuộc tính transform hoạt động */
+    transform-origin: center; /* Giúp xoay đều ngay tại tâm bông tuyết */
+}
