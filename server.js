@@ -5,6 +5,12 @@
  * Grid A* treats icebergs (radius + safety buffer) and simplified landmass
  * coasts as blocked cells, then string-pulls the corridor into waypoints.
  */
+// 1. Khai báo với tên mới (nasaApiKey)
+const nasaApiKey = process.env.NASA_API_KEY || 'DEMO_KEY';
+
+const verifyUrl = `https://nasa.gov{encodeURIComponent(apiKey)}`;
+
+
 const express = require("express");
 const h3 = require("h3-js");
 const path = require("path");
@@ -12,10 +18,11 @@ const fs = require("fs");
 const cors = require("cors");
 const http = require("http");
 const https = require("https");
-
 // Độ phân giải H3: 4 (~22km/ô) chạy cực nhẹ và mượt cho toàn thế giới
-const H3_RES = 4;
+// Sửa dòng H3_RES = 4 thành 5:
+const H3_RES = 5;
 const LAND_CELLS = new Set();
+const NEAR_COAST_CELLS = new Set(); // Thêm tập đánh dấu vùng ven bờ
 
 console.log("Dang nap ban do dat lien vao luoi luc giac H3...");
 const rawLand = JSON.parse(fs.readFileSync(path.join(__dirname, "land.geojson"), "utf8"));
@@ -23,20 +30,21 @@ const rawLand = JSON.parse(fs.readFileSync(path.join(__dirname, "land.geojson"),
 rawLand.features.forEach(feature => {
     if (!feature || !feature.geometry) return;
     const geom = feature.geometry;
-
-    // Đưa cả Polygon và MultiPolygon về chung một danh sách để quét
     const polygons = geom.type === "Polygon" ? [geom.coordinates] : geom.coordinates;
 
     polygons.forEach(poly => {
         try {
-            // Tham số true ở cuối báo cho H3 biết tọa độ trong GeoJSON là [kinh độ, vĩ độ]
             const cells = h3.polygonToCells(poly, H3_RES, true);
-            cells.forEach(cell => LAND_CELLS.add(cell));
-        } catch (e) {
-            // Bỏ qua các đa giác quá nhỏ nằm lọt thỏm bên trong 1 ô lục giác
-        }
+            cells.forEach(cell => {
+                // Vùng cấm tuyệt đối (sát bờ ~15km)
+                h3.gridDisk(cell, 1).forEach(c => LAND_CELLS.add(c));
+                // Vùng hạn chế ven bờ (~45km) để đẩy tàu ra xa
+                h3.gridDisk(cell, 3).forEach(c => NEAR_COAST_CELLS.add(c));
+            });
+        } catch (e) { }
     });
 });
+
 console.log(">>> HOAN TAT! Da ma hoa thanh cong", LAND_CELLS.size, "o luc giac dat lien.");
 
 const PORT = process.env.PORT || 3000;
@@ -62,11 +70,7 @@ const DEFAULT_ICE = [
 ];
 
 
-const FIRMS_SAMPLE = [
-    { id: "NASA-MODIS-801", lat: 74.7, lng: -12.1, risk: "high", type: "48h tabular fragment", source: "NASA MODIS sample" },
-    { id: "NASA-VIIRS-802", lat: 73.9, lng: -7.6, risk: "med", type: "48h low-thermal floe", source: "NASA VIIRS sample" },
-    { id: "NASA-VIIRS-803", lat: 75.15, lng: -15.2, risk: "high", type: "48h growler field", source: "NASA VIIRS sample" }
-];
+const FIRMS_SAMPLE = [];
 
 function haversineNm(lat1, lng1, lat2, lng2) {
     const R = 3440.065;
@@ -112,7 +116,30 @@ function inLand(lat, lng, zones) {
     }
     return null;
 }
+function inNearCoast(lat, lng) {
+    const cell = h3.latLngToCell(lat, lng, H3_RES);
+    return NEAR_COAST_CELLS.has(cell);
+}
 
+// 2. Trong hàm astar(...), sửa dòng tính biến step thành:
+const baseStep = dr !== 0 && dc !== 0 ? cellNm * Math.SQRT2 : cellNm;
+const [nLat, nLng] = grid.center(nr, nc);
+// Nếu đi vào vùng ven bờ (cách bờ < 45km), nhân chi phí lên 3.5 lần để đẩy tàu ra ngoài khơi
+const penalty = inNearCoast(nLat, nLng) ? 3.5 : 1.0;
+const step = baseStep * penalty;
+const tentative = g[current.i] + step;
+
+// 3. Trong hàm planRoute(...), sửa điều kiện clear để đường thẳng không kéo sát lại gần bờ:
+const clear = (a, b) => {
+    if (segmentHits(a, b, obstacles, land, bufferNm, 20)) return false;
+    // Không cho phép kéo thẳng đường nếu điểm giữa cắt vào vùng ven bờ (trừ khi điểm đầu/cuối đang ở gần bờ)
+    const midLat = (a[0] + b[0]) / 2;
+    const midLng = (a[1] + b[1]) / 2;
+    if (!inNearCoast(a[0], a[1]) && !inNearCoast(b[0], b[1]) && inNearCoast(midLat, midLng)) {
+        return false;
+    }
+    return true;
+};
 
 function normalizeObstacles(raw) {
     const source = Array.isArray(raw) && raw.length ? raw : DEFAULT_ICE;
@@ -128,7 +155,10 @@ function normalizeObstacles(raw) {
 }
 
 function segmentHits(a, b, obstacles, land, bufferNm, samples) {
-    const steps = Math.max(samples || 48, 150);
+    // Tăng từ 150 lên 600 để không lọt qua bất kỳ hòn đảo nhỏ nào
+    const steps = Math.max(samples || 48, 600);
+    // ... giữ nguyên phần code bên dưới của hàm này
+
     const listA = Array.from(a);
     const listB = Array.from(b);
     const aLat = listA.shift();
@@ -306,8 +336,8 @@ function buildGrid(start, end, obstacles, land, bufferNm) {
     const minLng = clamp(Math.min(sLng, eLng) - padDeg * 1.6, -180, 180);
     const maxLng = clamp(Math.max(sLng, eLng) + padDeg * 1.6, -180, 180);
 
-    const rows = 90;
-    const cols = 90;
+    const rows = 160;
+    const cols = 160;
     const latStep = (maxLat - minLat) / (rows - 1);
     const lngStep = (maxLng - minLng) / (cols - 1);
     const midLat = (minLat + maxLat) / 2;
@@ -481,10 +511,9 @@ function parsePair(value, name) {
     return [lat, lng];
 }
 
-function fetchText(url) {
+function fetchText(options) {
     return new Promise((resolve, reject) => {
-        const lib = url.startsWith("https") ? https : http;
-        const req = lib.get(url, { headers: { "User-Agent": "ice-flow/1.0" } }, (response) => {
+        const req = https.request(options, (response) => {
             if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
                 response.resume();
                 fetchText(response.headers.location).then(resolve, reject);
@@ -503,6 +532,7 @@ function fetchText(url) {
             req.destroy(new Error("FIRMS timeout"));
         });
         req.on("error", reject);
+        req.end();
     });
 }
 
@@ -549,35 +579,72 @@ app.get("/api/health", (_req, res) => {
     res.json({ ok: true, service: "ice-flow", algorithm: "A*" });
 });
 
-app.get("/api/firms", async (req, res) => {
-    const key = String(req.query.key || "").trim();
-    const south = Number(req.query.south);
-    const north = Number(req.query.north);
-    const west = Number(req.query.west);
-    const east = Number(req.query.east);
-    const days = clamp(Number(req.query.days) || 2, 1, 5);
-    if (!key || ![south, north, west, east].every(Number.isFinite)) {
-        return res.json({ source: "sample", hours: 48, features: FIRMS_SAMPLE });
-    }
-    const area = [west, south, east, north].map((n) => n.toFixed(4)).join(",");
-    const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${encodeURIComponent(key)}/VIIRS_SNPP_NRT/${area}/${days}`;
+app.get("/api/firms", (req, res) => {
     try {
-        const csv = await fetchText(url);
-        const features = parseFirmsCsv(csv);
-        if (!features.length) {
-            return res.json({ source: "sample", hours: 48, features: FIRMS_SAMPLE, warning: "FIRMS returned no points in this box." });
-        }
-        res.json({ source: "firms", hours: days * 24, features });
-    } catch (err) {
+        // 1. Đọc cả 2 tệp dữ liệu đã lưu
+        const file1 = JSON.parse(fs.readFileSync(path.join(__dirname, "eonet_raw.json"), "utf8"));
+        const file2 = JSON.parse(fs.readFileSync(path.join(__dirname, "eonet_moreraw.json"), "utf8"));
+
+        // 2. Gộp danh sách sự kiện của cả 2 tệp lại
+        const list1 = Array.isArray(file1.events) ? file1.events : (Array.isArray(file1.features) ? file1.features : []);
+        const list2 = Array.isArray(file2.events) ? file2.events : (Array.isArray(file2.features) ? file2.features : []);
+        const events = [...list1, ...list2];
+
+        const iceFeatures = [];
+        const seenIds = new Set();
+
+        // 3. Lọc lấy toàn bộ tảng băng (seaLakeIce) và vị trí mới nhất của từng tảng
+        [...events].reverse().forEach((ev) => {
+            const info = ev.properties || ev;
+            const isIce = Array.isArray(info.categories) && info.categories.some(c => c.id === "seaLakeIce");
+            if (!isIce) return;
+
+            const id = info.id || "EONET-ICE";
+            if (seenIds.has(id)) return;
+
+            let coords = null;
+            if (Array.isArray(ev.geometry) && ev.geometry.length) {
+                coords = ev.geometry[ev.geometry.length - 1].coordinates;
+            } else if (ev.geometry && Array.isArray(ev.geometry.coordinates)) {
+                coords = ev.geometry.type === "Point"
+                    ? ev.geometry.coordinates
+                    : ev.geometry.coordinates[ev.geometry.coordinates.length - 1];
+            }
+
+            if (Array.isArray(coords) && coords.length >= 2) {
+                const lng = Number(coords[0]); // Kinh độ
+                const lat = Number(coords[1]); // Vĩ độ
+
+                if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                    seenIds.add(id);
+                    iceFeatures.push({
+                        id: id,
+                        lat: lat,
+                        lng: lng,
+                        radiusNm: 12,
+                        risk: "high",
+                        type: info.title || "NASA Sea Ice",
+                        source: "NASA EONET File"
+                    });
+                }
+            }
+        });
+
+        console.log(">>> DA LAY DU LIEU TU 2 FILE EONET! Tong cong co", iceFeatures.length, "tang bang.");
+
         res.json({
-            source: "sample",
+            source: "firms",
             hours: 48,
-            features: FIRMS_SAMPLE,
-            warning: err.message || "FIRMS request failed."
+            features: iceFeatures
+        });
+
+    } catch (err) {
+        console.log(">>> LOI DOC FILE EONET:", err.message);
+        res.status(500).json({
+            error: "Lỗi đọc file dữ liệu EONET!"
         });
     }
 });
-
 app.post("/api/route", (req, res) => {
     try {
         const start = parsePair(req.body.start, "start");

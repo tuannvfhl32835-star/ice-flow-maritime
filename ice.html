@@ -371,6 +371,17 @@
                         <input id="nasa-file-input" type="file" accept=".json,.geojson,application/json" onchange="handleNasaFileUpload(this)" class="w-full text-xs text-slate-400">
                     </div>
                     <div class="glass-panel rounded-xl p-3">
+                        <div class="mb-3">
+                            <label for="firms-key" class="block text-[11px] font-bold text-slate-400 uppercase mb-1">
+                                NASA FIRMS API Key
+                            </label>
+                            <input type="text" id="firms-key" placeholder="Dán mã API Key NASA vào đây..."
+                                   class="w-full px-3 py-2 text-xs bg-slate-900/80 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-ice-cyan" />
+                        </div>
+                        <button onclick="loadNasa48h()" class="w-full mb-3 py-2 px-3 bg-ice-cyan/20 hover:bg-ice-cyan/30 border border-ice-cyan/50 text-ice-cyan text-xs font-bold rounded-lg transition">
+                            Tải dữ liệu vệ tinh NASA 48h
+                        </button>
+
                         <span class="text-[11px] font-bold text-slate-400 uppercase">Bản ghi đã nạp</span>
                         <div id="nasa-ingested-list" class="mt-2 space-y-2 text-[11px] max-h-48 overflow-y-auto text-slate-400">Chưa có bản ghi.</div>
                     </div>
@@ -779,6 +790,29 @@ function setEndPoint(lat, lng) {
                                                                                                                                                                                 if (!recommendedRouteLine) return null;
                                                                                                                                                                                 return recommendedRouteLine.getLatLngs().map((p) => [p.lat, p.lng]);
                                                                                                                                                                             }
+// Tự động phát hiện băng mới xuất hiện và bẻ lái đổi lộ trình ngay từ vị trí tàu đang chạy
+async function triggerDynamicReroute() {
+    // 1. Lấy vị trí hiện tại của tàu (nếu tàu đang chạy mô phỏng) hoặc điểm xuất phát
+    let curLat = parseFloat(document.getElementById("start-lat").value);
+    let curLng = parseFloat(document.getElementById("start-lng").value);
+    if (typeof shipMarker !== "undefined" && shipMarker && shipMarker.getLatLng) {
+        const pos = shipMarker.getLatLng();
+        curLat = pos.lat;
+        curLng = pos.lng;
+    }
+
+    const eLat = parseFloat(document.getElementById("end-lat").value);
+    const eLng = parseFloat(document.getElementById("end-lng").value);
+    if (![curLat, curLng, eLat, eLng].every(Number.isFinite)) return;
+
+    // 2. Cập nhật điểm xuất phát mới ngay tại vị trí tàu đang đứng & báo động đỏ
+    document.getElementById("start-lat").value = curLat.toFixed(5);
+    document.getElementById("start-lng").value = curLng.toFixed(5);
+    setStatus("⚠️ PHÁT HIỆN BĂNG CẢN ĐƯỜNG! Đang bẻ lái đổi lộ trình...", "text-amber-400 font-bold");
+
+    // 3. Gọi lại hàm tính tuyến A* để né tảng băng vừa xuất hiện
+    await startExpandingRouteSimulation();
+}
 
                                                                                                                                                                             async function startExpandingRouteSimulation() {
                                                                                                                                                                                 const sLat = parseFloat(document.getElementById("start-lat").value);
@@ -905,32 +939,39 @@ function setEndPoint(lat, lng) {
                                                                                                                                                                                 renderIcebergs();
                                                                                                                                                                             }
 
-                                                                                                                                                                            async function loadNasa48h() {
-                                                                                                                                                                                const key = document.getElementById("firms-key").value.trim();
-                                                                                                                                                                                const bounds = map.getBounds();
-                                                                                                                                                                                const params = new URLSearchParams({
-                                                                                                                                                                                    key: key,
-                                                                                                                                                                                    south: bounds.getSouth().toFixed(3),
-                                                                                                                                                                                    north: bounds.getNorth().toFixed(3),
-                                                                                                                                                                                    west: bounds.getWest().toFixed(3),
-                                                                                                                                                                                    east: bounds.getEast().toFixed(3),
-                                                                                                                                                                                    days: "2"
-                                                                                                                                                                                });
-                                                                                                                                                                                setStatus("Đang hỏi NASA FIRMS…", "text-ice-cyan font-semibold");
-                                                                                                                                                                                try {
-                                                                                                                                                                                    const res = await fetch("http://localhost:3000/api/firms?" + params.toString());
-                                                                                                                                                                                    const data = await res.json();
-                                                                                                                                                                                    const features = (data.features && data.features.length) ? data.features : nasa48hSample;
-                                                                                                                                                                                    mergeIce(features.map((row) => Object.assign({ radiusNm: row.risk === "high" ? 5 : 3, size: "Live", speed: "—" }, row)));
-                                                                                                                                                                                    noteIngest(features, data.source || "48h");
-                                                                                                                                                                                    if (features[0]) show2DMap(features[0].lat, features[0].lng, 6);
-                                                                                                                                                                                    setStatus(data.source === "firms" ? "FIRMS 48h: " + features.length + " điểm" : "Không có key FIRMS — đã nạp mẫu 48h", "text-emerald-400 font-semibold");
-                                                                                                                                                                                } catch (err) {
-                                                                                                                                                                                    mergeIce(nasa48hSample);
-                                                                                                                                                                                    noteIngest(nasa48hSample, "sample");
-                                                                                                                                                                                    setStatus("FIRMS offline, dùng mẫu 48h", "text-amber-400 font-semibold");
-                                                                                                                                                                                }
-                                                                                                                                                                            }
+async function loadNasa48h() {
+    // Lấy mã Key từ ô nhập liệu (ưu tiên ô mới thêm nếu có)
+    const keyInputs = document.querySelectorAll("#firms-key");
+    let key = "";
+    keyInputs.forEach(el => { if (el.value.trim()) key = el.value.trim(); });
+
+    if (!key) {
+        setStatus("❌ Vui lòng dán NASA API Key trước khi tải!", "text-rose-400 font-bold");
+        return;
+    }
+
+    setStatus("Đang xác thực Key & tải dữ liệu vệ tinh NASA...", "text-ice-cyan font-semibold");
+    try {
+        const res = await fetch("http://localhost:3000/api/firms?key=" + encodeURIComponent(key));
+        const data = await res.json();
+
+        if (!res.ok) {
+            setStatus("❌ " + (data.error || "Key NASA không hợp lệ!"), "text-rose-400 font-bold");
+            return;
+        }
+
+        const features = data.features || [];
+        mergeIce(features.map((row) => Object.assign({ radiusNm: 10, size: "NASA Live", speed: "Live" }, row)));
+        noteIngest(features, "NASA Live");
+        if (features) show2DMap(features.lat, features.lng, 4);
+        setStatus("✅ Đã tải " + features.length + " tảng băng thật từ NASA!", "text-emerald-400 font-bold");
+
+        if (recommendedRouteLine) triggerDynamicReroute();
+    } catch (err) {
+        setStatus("❌ Lỗi kết nối tới máy chủ Node.js!", "text-rose-400 font-bold");
+    }
+}
+
 
                                                                                                                                                                             function loadNasaHistoricalData() {
                                                                                                                                                                                 const year = document.getElementById("nasa-year-select").value;
