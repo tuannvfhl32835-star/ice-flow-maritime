@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ICE FLOW — maritime pathfinding server
  * POST /api/route  { start:[lat,lng], end:[lat,lng], bufferRadius, speedKnots?, obstacles? }
  *
@@ -6,7 +6,7 @@
  * coasts as blocked cells, then string-pulls the corridor into waypoints.
  */
 // 1. Khai báo với tên mới (nasaApiKey)
-const nasaApiKey = process.env.NASA_API_KEY || 'DEMO_KEY';
+const nasaApiKey = process.env.NASA_API_KEY || 'RJqjzdWLwBtFR9CmtHcBWWJJWcpnndchjGhNhFR9';
 
 const verifyUrl = `https://nasa.gov{encodeURIComponent(apiKey)}`;
 
@@ -109,6 +109,18 @@ function inGreenland(lat, lng) {
 }
 
 function inLand(lat, lng, zones) {
+    // 1. Khóa cứng toàn bộ chỏm băng không thể đi qua ở Bắc Cực (> 81.5°N)
+    if (lat > 81.5) return "North Pole Ice Cap";
+
+    // 2. Khóa cứng lục địa Nam Cực theo đúng đường bờ biển từng kinh độ (Antarctica Coastline)
+    if (lat < -63.0) {
+        // Bán đảo Nam Cực (Antarctic Peninsula: kinh độ -65° đến -55°) nhô lên tới -63.2°
+        if (lng >= -66 && lng <= -54 && lat < -63.2) return "Antarctic Peninsula";
+        // Vùng Đông Nam Cực (Enderby Land, Wilkes Land: kinh độ 0° đến 165°) nhô lên tới -65.5°
+        if (lng >= -10 && lng <= 168 && lat < -65.5) return "East Antarctica";
+        // Toàn bộ phần thềm lục địa Nam Cực còn lại phía dưới -70.5°
+        if (lat < -70.5) return "Antarctica Continent";
+    }
     if (inGreenland(lat, lng)) return "Greenland";
     const cell = h3.latLngToCell(lat, lng, H3_RES);
     if (LAND_CELLS.has(cell)) {
@@ -120,27 +132,6 @@ function inNearCoast(lat, lng) {
     const cell = h3.latLngToCell(lat, lng, H3_RES);
     return NEAR_COAST_CELLS.has(cell);
 }
-
-// 2. Trong hàm astar(...), sửa dòng tính biến step thành:
-const baseStep = dr !== 0 && dc !== 0 ? cellNm * Math.SQRT2 : cellNm;
-const [nLat, nLng] = grid.center(nr, nc);
-// Nếu đi vào vùng ven bờ (cách bờ < 45km), nhân chi phí lên 3.5 lần để đẩy tàu ra ngoài khơi
-const penalty = inNearCoast(nLat, nLng) ? 3.5 : 1.0;
-const step = baseStep * penalty;
-const tentative = g[current.i] + step;
-
-// 3. Trong hàm planRoute(...), sửa điều kiện clear để đường thẳng không kéo sát lại gần bờ:
-const clear = (a, b) => {
-    if (segmentHits(a, b, obstacles, land, bufferNm, 20)) return false;
-    // Không cho phép kéo thẳng đường nếu điểm giữa cắt vào vùng ven bờ (trừ khi điểm đầu/cuối đang ở gần bờ)
-    const midLat = (a[0] + b[0]) / 2;
-    const midLng = (a[1] + b[1]) / 2;
-    if (!inNearCoast(a[0], a[1]) && !inNearCoast(b[0], b[1]) && inNearCoast(midLat, midLng)) {
-        return false;
-    }
-    return true;
-};
-
 function normalizeObstacles(raw) {
     const source = Array.isArray(raw) && raw.length ? raw : DEFAULT_ICE;
     return source
@@ -263,6 +254,7 @@ function nearestFree(rows, cols, target, blocked) {
             }
         }
     }
+
     return best;
 }
 
@@ -466,9 +458,7 @@ function fuelSaving(directNm, routeNm, avoidedCount, bufferNm) {
 }
 
 function planRoute(start, end, obstacles, land, bufferNm) {
-    if (!segmentHits(start, end, obstacles, land, bufferNm, 48)) {
-        return { points: [start, end], algorithm: "great-circle", avoided: [] };
-    }
+    // Da tat che do di thang great-circle de luon ne dat lien & Nam Cuc bang A*
 
     const grid = buildGrid(start, end, obstacles, land, bufferNm);
     const startIdx = nearestFree(grid.rows, grid.cols, grid.toIndex(start[0], start[1]), grid.blocked);
@@ -580,6 +570,8 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.get("/api/firms", (req, res) => {
+    const DEFAULT_NASA_KEY = "RJqjzdWLwBtFR9CmtHcBWWJJWcpnndchjGhNhFR9";
+    const apiKey = String(req.query.key || DEFAULT_NASA_KEY).trim();
     try {
         // 1. Đọc cả 2 tệp dữ liệu đã lưu
         const file1 = JSON.parse(fs.readFileSync(path.join(__dirname, "eonet_raw.json"), "utf8"));
@@ -703,6 +695,78 @@ app.post("/api/route", (req, res) => {
         res.status(400).json({ error: err.message || "Invalid route request." });
     }
 });
+app.get("/api/asf-sar", async (req, res) => {
+    try {
+        const asfUrl = new URL("https://alaska.edu");
+        asfUrl.searchParams.set("dataset", "SENTINEL-1");
+        asfUrl.searchParams.set("intersectsWith", "POLYGON((-75 55,30 55,30 83,-75 83,-75 55))");
+        asfUrl.searchParams.set("maxResults", "20");
+        asfUrl.searchParams.set("output", "geojson");
+
+        console.log(">>> Dang lay du lieu Radar SAR thoi gian thuc tu NASA:", asfUrl.toString());
+        const rawText = await fetchText(asfUrl.toString());
+        if (rawText.trim().startsWith("<")) {
+            return res.status(503).json({ error: "Máy chủ NASA ASF DAAC đang bảo trì, vui lòng thử lại sau." });
+        }
+
+        const parsed = JSON.parse(rawText);
+        const features = Array.isArray(parsed.features) ? parsed.features : [];
+        const nowMs = Date.now();
+        const liveSarPoints = [];
+
+        features.forEach((f, idx) => {
+            const p = f.properties || {};
+            const lat = Number(p.centerLat);
+            const lng = Number(p.centerLon);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+            const scanTimeMs = p.startTime ? Date.parse(p.startTime) : nowMs;
+            const diffMinutes = Math.max(1, Math.round((nowMs - scanTimeMs) / 60000));
+            const diffHours = +(diffMinutes / 60).toFixed(1);
+
+            const timeAgoText = diffMinutes < 60
+                ? `${diffMinutes} phút trước`
+                : `${Math.floor(diffHours)} giờ ${diffMinutes % 60} phút trước`;
+
+            let confidence = "Cao";
+            let riskLevel = "low";
+            let reasonText = "Dữ liệu vệ tinh vừa mới quét, tọa độ băng phản ánh chính xác vị trí thực tế hiện tại.";
+
+            if (diffHours > 12) {
+                confidence = "Thấp";
+                riskLevel = "high";
+                reasonText = "Đã quá 12 giờ kể từ lần quét gần nhất; dưới tác động của dòng hải lưu và gió, khối băng nhiều khả năng đã trôi dạt sang vị trí khác.";
+            } else if (diffHours >= 2) {
+                confidence = "Trung bình";
+                riskLevel = "med";
+                reasonText = "Vệ tinh đã quét cách đây vài giờ; khối băng có thể đã dịch chuyển nhẹ từ 2 - 8 hải lý so với tọa độ gốc.";
+            }
+
+            liveSarPoints.push({
+                id: p.sceneName ? p.sceneName.slice(0, 18) : `NASA-SAR-${idx + 1}`,
+                lat: lat,
+                lng: lng,
+                radiusNm: 3.5,
+                tier: confidence === "Thấp" ? 3 : (confidence === "Trung bình" ? 2 : 1),
+                risk: riskLevel,
+                isSarLive: true,
+                platform: p.platform || "Sentinel-1 SAR",
+                scanTimeUtc: p.startTime || "N/A",
+                timeAgo: timeAgoText,
+                confidence: confidence,
+                confidenceReason: reasonText,
+                type: `SAR Radar (${p.platform || "Sentinel-1"}) • Tin cậy: ${confidence}`,
+                source: "NASA ASF DAAC Live"
+            });
+        });
+
+        console.log(">>> THANH CONG! Da lay", liveSarPoints.length, "diem Radar SAR that tu NASA.");
+        res.json({ source: "nasa-asf-live", features: liveSarPoints });
+    } catch (err) {
+        console.log(">>> LOI KET NOI NASA ASF:", err.message);
+        res.status(502).json({ error: "Lỗi kết nối tới NASA ASF DAAC: " + err.message });
+    }
+});
 
 if (require.main === module) {
     app.listen(PORT, () => {
@@ -713,3 +777,9 @@ if (require.main === module) {
 }
 
 module.exports = { app, planRoute, haversineNm };
+
+
+
+
+
+
