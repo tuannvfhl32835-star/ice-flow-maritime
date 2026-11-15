@@ -500,3 +500,89 @@ window.updateThreeJS3DObjects = function(routeCoords, currentShipLatLng) {
         window.threeShipMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), shipPos.clone().normalize());
     }
 };
+
+window.sarLiveLayerGroup = null;
+
+window.loadAsfSarRadar = async function() {
+    try {
+        if (typeof setStatus === "function") {
+            setStatus("🛰️ Đang kết nối trực tiếp vệ tinh Radar SAR Sentinel-1 (NASA ASF / CMR)...", "text-indigo-300 font-bold");
+        }
+        const res = await fetch("http://localhost:3000/api/asf-sar");
+        const data = await res.json();
+        if (!res.ok || data.error) {
+            alert(data.error || "Không lấy được dữ liệu Sentinel-1 từ NASA!");
+            return;
+        }
+
+        const sarList = data.features || [];
+        if (!sarList.length) {
+            alert("Vệ tinh Sentinel-1 hiện chưa có cảnh quét mới trong vùng chọn!");
+            return;
+        }
+
+        if (typeof mergeIce === "function") mergeIce(sarList);
+        if (typeof noteIngest === "function") noteIngest(sarList, "Sentinel-1 SAR");
+
+        if (window.sarLiveLayerGroup && typeof map !== "undefined" && map) {
+            map.removeLayer(window.sarLiveLayerGroup);
+        }
+        if (typeof map !== "undefined" && map) {
+            window.sarLiveLayerGroup = L.layerGroup().addTo(map);
+
+            sarList.forEach((pt, i) => {
+                const badgeColor = pt.confidence === "Cao" ? "#10b981" : (pt.confidence === "Trung bình" ? "#f59e0b" : "#f43f5e");
+
+                // 1. Vẽ khung dải quét thực tế (Swath Footprint) của vệ tinh Sentinel-1
+                if (Array.isArray(pt.polygonCoords) && pt.polygonCoords.length >= 3) {
+                    L.polygon(pt.polygonCoords, {
+                        color: "#38bdf8",
+                        weight: 1.5,
+                        dashArray: "5, 5",
+                        fillColor: "#0284c7",
+                        fillOpacity: 0.12
+                    }).bindTooltip(`Dải quét vệ tinh: ${pt.id} (${pt.timeAgo})`).addTo(window.sarLiveLayerGroup);
+                }
+
+                // 2. Vẽ điểm tâm phát hiện mục tiêu Radar SAR
+                const marker = L.circleMarker([pt.lat, pt.lng], {
+                    radius: 8,
+                    color: "#ffffff",
+                    weight: 1.5,
+                    fillColor: badgeColor,
+                    fillOpacity: 0.92
+                }).addTo(window.sarLiveLayerGroup);
+
+                const popupHtml = `
+                    <div style="min-width:245px; font-family:sans-serif; color:#0f172a; line-height:1.5;">
+                        <div style="font-weight:800; font-size:13px; color:#0369a1; border-bottom:1px solid #cbd5e1; padding-bottom:4px; margin-bottom:6px;">
+                            🛰️ ${pt.platform}
+                        </div>
+                        <div style="font-size:11.5px;">
+                            • <b>Mã cảnh vệ tinh:</b> <span style="font-family:monospace;">${pt.id}</span><br/>
+                            • <b>Thời gian quét (UTC):</b> ${pt.scanTimeUtc}<br/>
+                            • <b>Cập nhật gần nhất:</b> <b>${pt.timeAgo}</b><br/>
+                            • <b>Độ tin cậy tọa độ:</b> <span style="background:${badgeColor}; color:#fff; font-weight:bold; padding:1px 7px; border-radius:4px;">${pt.confidence}</span>
+                        </div>
+                        <div style="margin-top:6px; padding:6px; background:#f1f5f9; border-left:3px solid ${badgeColor}; font-size:11px; color:#334155;">
+                            <b>Phân tích SAR:</b> ${pt.confidenceReason}
+                        </div>
+                    </div>
+                `;
+                marker.bindPopup(popupHtml);
+                marker.bindTooltip(`Sentinel-1 #${i + 1} • ${pt.timeAgo} • Tin cậy: ${pt.confidence}`);
+            });
+
+            // Tự động bay bản đồ tới khu vực vệ tinh Sentinel-1 vừa quét (Greenland)
+            map.setView([sarList.at(0).lat, sarList.at(0).lng], 5);
+        }
+
+        if (typeof setStatus === "function") {
+            setStatus(`🛰️ Đã nạp ${sarList.length} khung quét Radar SAR thật từ vệ tinh Sentinel-1!`, "text-cyan-300 font-bold");
+        }
+        window.baseIcePositions = null;
+        if (typeof window.updateDangerZones === "function") window.updateDangerZones();
+    } catch (e) {
+        alert("Lỗi kết nối tới server.js: " + e.message);
+    }
+};

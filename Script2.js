@@ -1,3 +1,11 @@
+const response = await fetch(
+    "/data/greenland_GID001_data.json"
+);
+
+const data = await response.json();
+
+console.log(data.timeseries);
+console.log(data.observations);
 const http = require("http");
 const OpenAI = require("openai");
 const readline = require("readline");

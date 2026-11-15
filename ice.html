@@ -12,6 +12,14 @@
     <script src="https://unpkg.com/globe.gl"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
+                <script>
+                fetch('/api/greenland')
+                    .then(response => response.json())
+                    .then(data => {
+                        console.log("Dữ liệu Greenland:", data);
+                        // Sau khi lấy được dữ liệu 'data', bạn viết các lệnh vẽ điểm lên bản đồ Leaflet hoặc hiển thị ra màn hình ở đây
+                    })
+                    .catch(error => console.error("Lỗi tải dữ liệu:", error));
                                                                                                                                                 tailwind.config = {
                                                                                                                                                     darkMode: 'class',
                                                                                                                                                     theme: {
@@ -368,7 +376,7 @@
                             <button onclick="loadNasaHistoricalData()" class="px-3 py-2 text-xs font-bold rounded-lg border border-indigo-500/40 text-indigo-300 bg-indigo-600/20">Nạp</button>
                         </div>
                         <label class="block text-[11px] text-slate-300">Tệp .json / .geojson</label>
-                        <input id="nasa-file-input" type="file" accept=".json,.geojson,application/json" onchange="handleNasaFileUpload(this)" class="w-full text-xs text-slate-400">
+                        <input id="nasa-file-input" type="file" accept=".json,.geojson,.csv,.kml,.kmz" onchange="handleNasaFileUpload(this)" class="w-full text-xs text-slate-400">
                     </div>
                     <div class="glass-panel rounded-xl p-3">
                         <div class="mb-3">
@@ -385,7 +393,7 @@
                             <label class="block text-[11px] font-bold text-cyan-400 uppercase mb-1">
                                 Hoặc tải lên file dữ liệu NASA (.geojson / .json)
                             </label>
-                            <input type="file" id="nasa-geojson-upload" accept=".json,.geojson" onchange="handleNasaGeoJsonUpload(event)"
+                            <input type="file" id="nasa-geojson-upload" accept=".json,.geojson,.csv,.kml,.kmz" onchange="handleNasaGeoJsonUpload(event)"
                                    class="w-full text-[11px] text-slate-300 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-cyan-500/20 file:text-cyan-300 hover:file:bg-cyan-500/30 cursor-pointer" />
                         </div>
 
@@ -2046,8 +2054,266 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 </script>
 <script src="ship-features.js"></script>
+<script src="https://cloudflare.com"></script>
+<script>
+window.parseNasaKmlText = function(kmlText, fileName) {
+    const parser = new DOMParser();
+    const xml = parser.parseFromString(kmlText, "text/xml");
+    const placemarks = Array.from(xml.getElementsByTagName("Placemark"));
+    const results = [];
+
+    placemarks.forEach((pm, idx) => {
+        const nameEl = pm.getElementsByTagName("name").item(0);
+        const descEl = pm.getElementsByTagName("description").item(0);
+        const coordsEl = pm.getElementsByTagName("coordinates").item(0);
+        if (!coordsEl) return;
+
+        const rawPairs = coordsEl.textContent.trim().split(/\s+/);
+        const pts = rawPairs.map(pair => {
+            const parts = pair.split(",").map(Number);
+            return (parts.length >= 2 && Number.isFinite(parts.at(0)) && Number.isFinite(parts.at(1)))
+                ? [parts.at(1), parts.at(0)] // [lat, lng]
+                : null;
+        }).filter(Boolean);
+
+        if (!pts.length) return;
+
+        const avgLat = +(pts.reduce((s, p) => s + p.at(0), 0) / pts.length).toFixed(4);
+        const avgLng = +(pts.reduce((s, p) => s + p.at(1), 0) / pts.length).toFixed(4);
+        const title = nameEl ? nameEl.textContent.trim() : `NISAR-Zone-${idx + 1}`;
+        const desc = descEl ? descEl.textContent.replace(/<[^>]+>/g, " ").trim().slice(0, 150) : "Dữ liệu độ phủ quỹ đạo từ gói NASA NISAR";
+
+        results.push({
+            id: `NISAR-KML-${idx + 1}`,
+            lat: avgLat,
+            lng: avgLng,
+            polygonCoords: pts.length >= 3 ? pts : null,
+            radiusNm: 4.5,
+            tier: 2,
+            risk: "med",
+            confidence: "Cao",
+            timeAgo: "Theo gói dữ liệu NISAR",
+            confidenceReason: "Trích xuất trực tiếp từ file độ phủ vệ tinh NASA NISAR (.kmz/.kml).",
+            type: `${title} (NASA NISAR)`,
+            description: desc,
+            source: fileName || "NASA NISAR KMZ"
+        });
+    });
+    return results;
+};
+
+window.handleNasaKmzOrKmlFile = async function(file) {
+    try {
+        let kmlText = "";
+        if (file.name.toLowerCase().endsWith(".kmz")) {
+            const arrayBuf = await file.arrayBuffer();
+            const zip = await JSZip.loadAsync(arrayBuf);
+            const kmlFile = Object.values(zip.files).find(f => f.name.toLowerCase().endsWith(".kml"));
+            if (!kmlFile) throw new Error("Không tìm thấy file doc.kml trong gói KMZ!");
+            kmlText = await kmlFile.async("string");
+        } else {
+            kmlText = await file.text();
+        }
+
+        const nisarItems = window.parseNasaKmlText(kmlText, file.name);
+        if (!nisarItems.length) {
+            alert("File KML/KMZ này không chứa tọa độ vùng quét!");
+            return;
+        }
+
+        if (window.nisarKmlLayer && typeof map !== "undefined" && map) {
+            map.removeLayer(window.nisarKmlLayer);
+        }
+        if (typeof map !== "undefined" && map) {
+            window.nisarKmlLayer = L.layerGroup().addTo(map);
+            nisarItems.forEach(item => {
+                if (item.polygonCoords) {
+                    L.polygon(item.polygonCoords, {
+                        color: "#818cf8",
+                        weight: 1.5,
+                        fillColor: "#6366f1",
+                        fillOpacity: 0.16
+                    }).bindPopup(`<b>🛰️ ${item.type}</b><br/>${item.description}`).addTo(window.nisarKmlLayer);
+                }
+            });
+            map.setView([nisarItems.at(0).lat, nisarItems.at(0).lng], 4);
+        }
+
+        // Gộp chung dữ liệu từ file KMZ với dữ liệu quét trực tiếp đang có (không ghi đè mất dữ liệu cũ)
+        if (typeof mergeIce === "function") mergeIce(nisarItems);
+        if (typeof noteIngest === "function") noteIngest(nisarItems, "NASA NISAR KMZ");
+        if (typeof window.updateDangerZones === "function") window.updateDangerZones();
+        if (typeof setStatus === "function") {
+            setStatus(`✅ Đã kết hợp ${nisarItems.length} vùng từ file NASA (${file.name}) cùng dữ liệu thời gian thực!`, "text-emerald-400 font-bold");
+        }
+    } catch (err) {
+        alert("Lỗi đọc file KMZ/KML: " + err.message);
+    }
+};
+
+document.addEventListener("change", function(e) {
+    const input = e.target;
+    if (input && input.type === "file" && input.files && input.files.length > 0) {
+        const f = input.files.item(0);
+        const lower = f.name.toLowerCase();
+        if (lower.endsWith(".kmz") || lower.endsWith(".kml")) {
+            e.stopImmediatePropagation();
+            window.handleNasaKmzOrKmlFile(f);
+        }
+    }
+}, true);
+</script>
+
+<script>
+window.parseAnyNasaKml = function(kmlText, fileName) {
+    const results = [];
+    // Bóc tách trực tiếp mọi khối <coordinates>...</coordinates> bất kể chuẩn XML/LineString/Polygon
+    const coordBlocks = [...kmlText.matchAll(/<coordinates[^>]*>([\s\S]*?)<\/coordinates>/gi)];
+
+    coordBlocks.forEach((match, idx) => {
+        const raw = match[1].trim();
+        const pts = raw.split(/\s+/).map(token => {
+            const nums = token.split(",").map(Number);
+            // KML chuẩn của NASA luôn xếp [Kinh độ (lng), Vĩ độ (lat), Độ cao]
+            return (nums.length >= 2 && Number.isFinite(nums[0]) && Number.isFinite(nums[1]) && Math.abs(nums[1]) <= 90)
+                ? [nums[1], nums[0]]
+                : null;
+        }).filter(Boolean);
+
+        if (!pts.length) return;
+
+        // Lấy tối đa 50 đường/điểm đại diện mới nhất để bản đồ hiển thị mượt mà
+        if (results.length >= 50) return;
+
+        const midPt = pts[Math.floor(pts.length / 2)];
+        results.push({
+            id: `NSIDC-GID-${idx + 1}`,
+            lat: +midPt[0].toFixed(4),
+            lng: +midPt[1].toFixed(4),
+            lineCoords: pts.length >= 2 ? pts : null,
+            radiusNm: 18,
+            tier: 2,
+            risk: "med",
+            confidence: "Cao",
+            timeAgo: "Dữ liệu vệ tinh NASA NSIDC (1972–2022)",
+            confidenceReason: `Đường mép sông băng Greenland trích xuất từ file ${fileName} (NASA NSIDC-0788).`,
+            type: `Mép sông băng Greenland #${idx + 1}`,
+            source: fileName
+        });
+    });
+    return results;
+};
+
+window.handleNasaFileUniversal = async function(file) {
+    try {
+        const fileName = file.name;
+        const lower = fileName.toLowerCase();
+        let results = [];
+
+        if (lower.endsWith(".kmz")) {
+            const arrayBuf = await file.arrayBuffer();
+            const resp = await fetch("http://localhost:3000/api/parse-kmz", {
+                method: "POST",
+                headers: { "Content-Type": "application/octet-stream" },
+                body: arrayBuf
+            });
+            const data = await resp.json();
+            if (!resp.ok || data.error) throw new Error(data.error || "Lỗi giải nén KMZ");
+            results = window.parseAnyNasaKml(data.kmlText, fileName);
+        } else if (lower.endsWith(".kml")) {
+            const kmlText = await file.text();
+            results = window.parseAnyNasaKml(kmlText, fileName);
+        } else if (lower.endsWith(".csv")) {
+            const csvText = await file.text();
+            const lines = csvText.trim().split(/\r?\n/);
+            if (lines.length >= 2) {
+                const headers = lines[0].split(",").map(h => h.replace(/"/g, "").trim());
+                const idxLat = headers.findIndex(h => /lat/i.test(h));
+                const idxLng = headers.findIndex(h => /lon|lng/i.test(h));
+                const idxDate = headers.findIndex(h => /date|time/i.test(h));
+                const idxSensor = headers.findIndex(h => /sensor|sat|platform/i.test(h));
+
+                const step = Math.max(1, Math.floor((lines.length - 1) / 50));
+                for (let i = 1; i < lines.length; i += step) {
+                    const cols = lines[i].split(",").map(c => c.replace(/"/g, "").trim());
+                    const lat = Number(cols[idxLat]);
+                    const lng = Number(cols[idxLng]);
+                    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90) continue;
+
+                    const dt = idxDate >= 0 ? cols[idxDate] : "N/A";
+                    const sensor = idxSensor >= 0 ? cols[idxSensor] : "Sentinel-1 / Landsat";
+                    results.push({
+                        id: `NSIDC-CSV-${i}`,
+                        lat: +lat.toFixed(4),
+                        lng: +lng.toFixed(4),
+                        radiusNm: 18,
+                        tier: 2,
+                        risk: "med",
+                        confidence: "Cao",
+                        timeAgo: `Ngày vệ tinh đo: ${dt}`,
+                        confidenceReason: `Tọa độ mép băng thật từ cảm biến ${sensor} trong file ${fileName}.`,
+                        type: `Mép băng Greenland (${sensor})`,
+                        source: fileName
+                    });
+                }
+            }
+        }
+
+        if (!results.length) {
+            alert(`Không tìm thấy tọa độ hợp lệ trong file ${fileName}!`);
+            return;
+        }
+
+        // Chuyển sang bản đồ 2D nếu đang ở 3D để nhìn rõ đường ranh giới băng chi tiết
+        if (typeof setGlobeMode === "function") {
+            try { setGlobeMode(false); } catch (e) {}
+        }
+
+        if (window.nsidcLayerGroup && typeof map !== "undefined" && map) {
+            map.removeLayer(window.nsidcLayerGroup);
+        }
+        if (typeof map !== "undefined" && map) {
+            window.nsidcLayerGroup = L.layerGroup().addTo(map);
+            results.forEach(pt => {
+                if (pt.lineCoords) {
+                    L.polyline(pt.lineCoords, { color: "#38bdf8", weight: 3 }).addTo(window.nsidcLayerGroup);
+                }
+                L.circleMarker([pt.lat, pt.lng], {
+                    radius: 6, color: "#ffffff", weight: 1.5, fillColor: "#0284c7", fillOpacity: 0.95
+                }).bindPopup(`<b>🧊 ${pt.type}</b><br/>Tọa độ thật: ${pt.lat}°, ${pt.lng}°<br/>${pt.timeAgo}<br/><small>${pt.confidenceReason}</small>`)
+                  .addTo(window.nsidcLayerGroup);
+            });
+            map.setView([results[0].lat, results[0].lng], 7);
+        }
+
+        if (typeof mergeIce === "function") mergeIce(results);
+        if (typeof noteIngest === "function") noteIngest(results, "NASA NSIDC Data");
+        if (typeof window.updateDangerZones === "function") window.updateDangerZones();
+        if (typeof setStatus === "function") {
+            setStatus(`✅ Đã đọc và vẽ ${results.length} đường/điểm băng thật từ file ${fileName}!`, "text-cyan-300 font-bold");
+        }
+    } catch (err) {
+        alert("Lỗi xử lý file NASA: " + err.message);
+    }
+};
+
+document.addEventListener("change", function(e) {
+    const input = e.target;
+    if (!input || input.type !== "file" || !input.files || !input.files.length) return;
+    const f = input.files[0];
+    const lower = f.name.toLowerCase();
+    if (lower.endsWith(".kml") || lower.endsWith(".kmz") || lower.endsWith(".csv")) {
+        e.stopImmediatePropagation();
+        window.handleNasaFileUniversal(f);
+    }
+}, true);
+</script>
 </body>
 </html>
+
+
+
+
 
 
 
