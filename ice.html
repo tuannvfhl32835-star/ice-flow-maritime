@@ -2308,8 +2308,29 @@ document.addEventListener("change", function(e) {
     }
 }, true);
 </script>
+<style id="force-dark-ui">
+header, nav, .top-bar, #top-header, #sidebar, aside,
+header > div, aside > div:first-child {
+    background-color: #0b1120 !important;
+    color: #e2e8f0 !important;
+    border-color: rgba(51, 65, 85, 0.85) !important;
+}
+header *, aside [role="tablist"] button, aside .tab-btn,
+button[data-tab], .nav-tab {
+    color: #cbd5e1 !important;
+}
+header .text-slate-900, header .text-gray-900, header .text-black,
+aside .text-slate-900, aside .text-gray-900, aside .text-black {
+    color: #f8fafc !important;
+}
+.bg-white, .bg-slate-50, .bg-slate-100, .bg-gray-50, .bg-gray-100 {
+    background-color: #0f172a !important;
+    color: #e2e8f0 !important;
+}
+</style>
 </body>
 </html>
+
 
 
 
